@@ -25,7 +25,7 @@ import {
 interface VaultContextType {
   isUnlocked: boolean;
   sessionKey: CryptoKey | null;
-  setupVault: (pin: string, userId: string, email: string) => Promise<boolean>;
+  setupVault: (pin: string, userId: string, email: string, options?: { skipPasskey?: boolean; authenticatorAttachment?: AuthenticatorAttachment }) => Promise<boolean>;
   unlockWithPin: (pin: string, userId: string) => Promise<boolean>;
   unlockWithPasskey: (userId: string) => Promise<boolean>;
   resetPin: (newPin: string, userId: string) => Promise<boolean>;
@@ -62,7 +62,8 @@ export function VaultProvider({
 }: VaultProviderProps) {
   // The DEK handle never leaves this closure — it is not exposed on the
   // context value. Consumers encrypt/decrypt through the provided functions.
-  const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
+  const sessionKeyRef = useRef<CryptoKey | null>(null);
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleError = useCallback(
@@ -75,12 +76,13 @@ export function VaultProvider({
   );
 
   const lock = useCallback(() => {
-    setSessionKey(null);
+    sessionKeyRef.current = null;
+    setIsUnlocked(false);
   }, []);
 
   // --- Auto-locking ---
   useEffect(() => {
-    if (!sessionKey) return;
+    if (!isUnlocked) return;
 
     const handleVisibilityChange = () => {
       if (lockOnWindowBlur && document.visibilityState === 'hidden') lock();
@@ -109,7 +111,7 @@ export function VaultProvider({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [sessionKey, autoLockTimeoutMs, lockOnWindowBlur, lock]);
+  }, [isUnlocked, autoLockTimeoutMs, lockOnWindowBlur, lock]);
 
   // --- Status ---
   const checkVaultStatus = useCallback(
@@ -143,7 +145,7 @@ export function VaultProvider({
 
   // --- Setup ---
   const setupVault = useCallback(
-    async (pin: string, userId: string, email: string) => {
+    async (pin: string, userId: string, email: string, options?: { skipPasskey?: boolean; authenticatorAttachment?: AuthenticatorAttachment }) => {
       try {
         const dek = await generateDEK();
         const salt = crypto.getRandomValues(new Uint8Array(32));
@@ -153,15 +155,17 @@ export function VaultProvider({
 
         let passkeyId: string | null = null;
         let passkeyEnvelope: string | null = null;
-        try {
-          const { id, key } = await registerPasskey(userId, email);
-          passkeyId = id;
-          passkeyEnvelope = JSON.stringify(await wrapKey(dek, key));
-        } catch (err) {
-          // Passkey is optional at setup; user can add it later via setPasskey.
-          handleError(
-            new Error('Passkey skipped or unsupported during setup: ' + String(err))
-          );
+        if (!options?.skipPasskey) {
+          try {
+            const { id, key } = await registerPasskey(userId, email, { authenticatorAttachment: options?.authenticatorAttachment });
+            passkeyId = id;
+            passkeyEnvelope = JSON.stringify(await wrapKey(dek, key));
+          } catch (err) {
+            // Passkey is optional at setup; user can add it later via setPasskey.
+            handleError(
+              new Error('Passkey skipped or unsupported during setup: ' + String(err))
+            );
+          }
         }
 
         await storageAdapter.saveEnvelopes(userId, {
@@ -171,7 +175,8 @@ export function VaultProvider({
           passkeyId,
         });
 
-        setSessionKey(dek);
+        sessionKeyRef.current = dek;
+        setIsUnlocked(true);
         return true;
       } catch (err) {
         handleError(err);
@@ -193,7 +198,8 @@ export function VaultProvider({
         const envelope = JSON.parse(data.pinEnvelope) as EncryptedPayload;
         const dek = await unwrapKey(envelope, kek);
 
-        setSessionKey(dek);
+        sessionKeyRef.current = dek;
+        setIsUnlocked(true);
         return true;
       } catch (err) {
         handleError(err);
@@ -213,7 +219,8 @@ export function VaultProvider({
         const envelope = JSON.parse(data.passkeyEnvelope) as EncryptedPayload;
         const dek = await unwrapKey(envelope, passkeyWrappingKey);
 
-        setSessionKey(dek);
+        sessionKeyRef.current = dek;
+        setIsUnlocked(true);
         return true;
       } catch (err) {
         handleError(err);
@@ -227,7 +234,7 @@ export function VaultProvider({
   const resetPin = useCallback(
     async (newPin: string, userId: string) => {
       try {
-        if (!sessionKey) throw new Error('Vault must be unlocked.');
+        if (!sessionKeyRef.current) throw new Error('Vault must be unlocked.');
 
         // Snapshot only the fields this operation owns, so a rollback cannot
         // clobber a passkey envelope changed by a concurrent session.
@@ -240,7 +247,7 @@ export function VaultProvider({
         const salt = crypto.getRandomValues(new Uint8Array(32));
         const hexSalt = bufToHex(salt.buffer);
         const newPinWrappingKey = await deriveKeyFromPin(newPin, salt.buffer);
-        const newPinEnvelope = await wrapKey(sessionKey, newPinWrappingKey);
+        const newPinEnvelope = await wrapKey(sessionKeyRef.current, newPinWrappingKey);
 
         try {
           await storageAdapter.saveEnvelopes(userId, {
@@ -267,7 +274,7 @@ export function VaultProvider({
         return false;
       }
     },
-    [sessionKey, storageAdapter, handleError]
+    [storageAdapter, handleError]
   );
 
   // Add or replace the passkey envelope. Replaces resetPasskey and also serves
@@ -275,7 +282,7 @@ export function VaultProvider({
   const setPasskey = useCallback(
     async (userId: string, email: string) => {
       try {
-        if (!sessionKey) throw new Error('Vault must be unlocked.');
+        if (!sessionKeyRef.current) throw new Error('Vault must be unlocked.');
 
         const current = await storageAdapter.loadEnvelopes(userId);
         const priorPasskey = {
@@ -284,7 +291,7 @@ export function VaultProvider({
         };
 
         const { id: passkeyId, key } = await registerPasskey(userId, email);
-        const newPasskeyEnvelope = await wrapKey(sessionKey, key);
+        const newPasskeyEnvelope = await wrapKey(sessionKeyRef.current, key);
 
         try {
           await storageAdapter.saveEnvelopes(userId, {
@@ -311,31 +318,31 @@ export function VaultProvider({
         return false;
       }
     },
-    [sessionKey, storageAdapter, handleError]
+    [storageAdapter, handleError]
   );
 
   // --- Data helpers ---
   const encryptPayload = useCallback(
     async (data: unknown) => {
-      if (!sessionKey) throw new Error('Vault is locked');
-      return await encryptData(data, sessionKey);
+      if (!sessionKeyRef.current) throw new Error('Vault is locked');
+      return await encryptData(data, sessionKeyRef.current);
     },
-    [sessionKey]
+    []
   );
 
   const decryptPayload = useCallback(
     async (payload: EncryptedPayload) => {
-      if (!sessionKey) throw new Error('Vault is locked');
-      return await decryptData(payload, sessionKey);
+      if (!sessionKeyRef.current) throw new Error('Vault is locked');
+      return await decryptData(payload, sessionKeyRef.current);
     },
-    [sessionKey]
+    []
   );
 
   return (
     <VaultContext.Provider
       value={{
-        isUnlocked: !!sessionKey,
-        sessionKey,
+        isUnlocked: isUnlocked,
+        sessionKey: sessionKeyRef.current,
         setupVault,
         unlockWithPin,
         unlockWithPasskey,

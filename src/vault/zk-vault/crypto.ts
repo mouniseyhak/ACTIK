@@ -201,7 +201,8 @@ export function isWebAuthnAvailable(): boolean {
 
 export async function registerPasskey(
   userId: string,
-  email: string
+  email: string,
+  options?: { authenticatorAttachment?: AuthenticatorAttachment }
 ): Promise<{ id: string; key: CryptoKey }> {
   const challenge = window.crypto.getRandomValues(new Uint8Array(32));
 
@@ -222,6 +223,7 @@ export async function registerPasskey(
       authenticatorSelection: {
         userVerification: 'required',
         residentKey: 'required',
+        authenticatorAttachment: options?.authenticatorAttachment,
       },
       timeout: 60000,
       extensions: {

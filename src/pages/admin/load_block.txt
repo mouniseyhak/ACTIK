@@ -1,0 +1,61 @@
+  useEffect(() => {
+    let active = true
+
+    async function loadData() {
+      try {
+        setLoading(true)
+        setInitialError(null)
+
+        // Retrieve admin session information
+        const { data: sessionData } = await supabase.auth.getSession()
+        if (sessionData?.session?.user && active) {
+          setCurrentUser({
+            id: sessionData.session.user.id,
+            email: sessionData.session.user.email,
+          })
+        }
+
+        // Fetch registry, credentials, students, and profile emails in parallel
+        const [issuersRes, credentialsRes, studentsRes, profilesRes] = await Promise.all([
+          supabase.from('issuers').select('*').order('created_at', { ascending: false }),
+          supabase.from('credentials').select('id', { count: 'exact' }),
+          supabase.from('profiles').select('id', { count: 'exact' }).eq('role', 'student'),
+          supabase.from('profiles').select('id, email'),
+        ])
+
+        if (issuersRes.error) throw issuersRes.error
+
+        if (active) {
+          const mappedIssuers = (issuersRes.data || []).map((row) =>
+            mapDbIssuer(row as Record<string, unknown>)
+          )
+          setIssuers(mappedIssuers)
+
+          const emails: Record<string, string> = {}
+          if (profilesRes.data) {
+            profilesRes.data.forEach((p) => {
+              emails[p.id] = p.email || ''
+            })
+          }
+          setEmailMap(emails)
+
+          setTotalCredentials(credentialsRes.count || 0)
+          setTotalStudents(studentsRes.count || 0)
+          setLoading(false)
+        }
+      } catch (err: any) {
+        console.error('Initial load failed:', err)
+        if (active) {
+          setInitialError(err.message || 'Failed to load registry data')
+          setLoading(false)
+        }
+      }
+    }
+
+    loadData()
+
+    return () => {
+      active = false
+    }
+  }, [])
+

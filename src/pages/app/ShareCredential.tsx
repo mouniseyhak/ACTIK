@@ -1,0 +1,1695 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useParams, Link, useSearchParams } from 'react-router-dom'
+import { supabase } from '../../lib/supabase'
+import { QRCodeSVG } from 'qrcode.react'
+import { useZkVault } from '../../vault/zk-vault'
+import { readDisclosures, present } from '../../lib/sdjwt'
+import { checkRateLimit } from '../../lib/rateLimit'
+import { Lock, CheckCircle, Copy, ExternalLink, Mail, Download, ChevronDown, ChevronUp, Calendar, AlertTriangle, Clock, Trash2 } from 'lucide-react'
+
+// Note: The prompt expects: import { useVault } from '../../vault/zk-vault/useVault'
+// But the actual file in this project exports useZkVault from '../../vault/zk-vault'
+
+// Note: The prompt expects: import { createPresentation } from '../../lib/sdjwt'
+// But the actual file in this project exports present from '../../lib/sdjwt'
+
+interface Credential {
+  id: string
+  holder_id: string
+  issuer_did: string
+  institution_name: string
+  degree_title: string
+  sd_jwt: string
+  claimed: boolean
+  created_at: string
+  cipher?: string
+  iv?: string
+}
+
+interface ShareRecord {
+  id: string
+  owner?: string
+  presentation: string
+  issuer_did?: string
+  revealed?: string[]
+  expires_at: string
+  created_at: string
+}
+
+type ExpiryOption = '1day' | '7days' | '30days' | '90days' | 'custom'
+
+// Shared spin keyframe styles
+const spinStyles = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`
+
+export default function ShareCredential() {
+  const { credentialId } = useParams<{ credentialId: string }>()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const step = searchParams.get('step') || 'sharing'
+  const { unlockWithPin, unlockWithPasskey, decryptPayload, isUnlocked } = useZkVault()
+
+  // Session & Loading states
+  const [currentUser, setCurrentUser] = useState<any | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<'not_found' | 'not_claimed' | 'error' | null>(null)
+  const [pendingDecryptAfterUnlock, setPendingDecryptAfterUnlock] = useState(false)
+
+  // Data states
+  const [credential, setCredential] = useState<Credential | null>(null)
+  const [decryptedSDJwt, setDecryptedSDJwt] = useState<string | null>(null)
+  const [availableClaims, setAvailableClaims] = useState<Record<string, any>>({})
+  const [pastShares, setPastShares] = useState<ShareRecord[]>([])
+
+
+  // Unlock Modal states
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
+  const [pinInput, setPinInput] = useState('')
+  const [unlockError, setUnlockError] = useState<string | null>(null)
+  const [isUnlocking, setIsUnlocking] = useState(false)
+  const [unlockMethod, setUnlockMethod] = useState<'pin' | 'passkey' | 'biometric' | 'both' | null>(null)
+
+  // Selection states (Step 2 & 3)
+  const [selectedFields, setSelectedFields] = useState<string[]>(['name', 'year'])
+  const [expiryOption, setExpiryOption] = useState<ExpiryOption>('7days')
+  const [customDate, setCustomDate] = useState('')
+
+  // Share action states
+  const [isSharing, setIsSharing] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
+  const [createdShare, setCreatedShare] = useState<ShareRecord | null>(null)
+  const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({})
+
+  // Expose collapsible list state
+  const [pastSharesOpen, setPastSharesOpen] = useState(true)
+
+  // Quick date calculations
+  const calculateExpiryDate = useCallback((): Date => {
+    const now = new Date()
+    if (expiryOption === '1day') return new Date(now.setDate(now.getDate() + 1))
+    if (expiryOption === '7days') return new Date(now.setDate(now.getDate() + 7))
+    if (expiryOption === '30days') return new Date(now.setDate(now.getDate() + 30))
+    if (expiryOption === '90days') return new Date(now.setDate(now.getDate() + 90))
+    if (expiryOption === 'custom' && customDate) return new Date(customDate)
+    
+    // Default 7 days
+    return new Date(now.setDate(now.getDate() + 7))
+  }, [expiryOption, customDate])
+
+  const [liveExpiry, setLiveExpiry] = useState<Date>(new Date())
+
+  useEffect(() => {
+    setLiveExpiry(calculateExpiryDate())
+  }, [calculateExpiryDate])
+
+  // Fetch credential and past shares on mount
+  const loadData = useCallback(async (user: any) => {
+    if (!credentialId) return
+
+    try {
+      setLoading(true)
+      setLoadError(null)
+
+      // Query credential
+      const { data: credData, error: credErr } = await supabase
+        .from('credentials')
+        .select('*')
+        .eq('id', credentialId)
+        .single()
+
+      if (credErr || !credData) {
+        setLoadError('not_found')
+        setLoading(false)
+        return
+      }
+
+      // Check owner mapping (holder_id or owner fallback)
+      const ownerId = credData.holder_id || credData.owner
+      if (ownerId !== user.id) {
+        setLoadError('not_found')
+        setLoading(false)
+        return
+      }
+
+      // Check claimed mapping (claimed column or cipher/iv presence)
+      const claimedVal = credData.claimed !== undefined ? credData.claimed : true
+      if (!claimedVal) {
+        setLoadError('not_claimed')
+        setLoading(false)
+        return
+      }
+
+      setCredential({
+        id: credData.id,
+        holder_id: ownerId,
+        issuer_did: credData.issuer_did || 'did:web:...',
+        institution_name: credData.institution_name || '',
+        degree_title: credData.degree_title || credData.label || 'Certificate',
+        sd_jwt: credData.sd_jwt || '',
+        claimed: true,
+        created_at: credData.created_at,
+        cipher: credData.cipher,
+        iv: credData.iv
+      })
+
+
+
+      // Fetch past shares
+      const sharesRes = await supabase
+        .from('shares')
+        .select('id, owner, presentation, issuer_did, revealed, expires_at, created_at')
+        .eq('owner', user.id)
+        .order('created_at', { ascending: false })
+
+      if (sharesRes.error) throw sharesRes.error
+
+      const sharesList: ShareRecord[] = (sharesRes.data || [])
+        .filter((s: any) => s.issuer_did === credData.issuer_did || s.presentation)
+
+      setPastShares(sharesList)
+      setLoading(false)
+    } catch {
+      setLoadError('error')
+      setLoading(false)
+    }
+  }, [credentialId])
+
+  const fetchUnlockMethod = useCallback(async (userId: string) => {
+    try {
+      const { data: vaultData } = await supabase
+        .from('vaults')
+        .select('unlock_method')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (vaultData && vaultData.unlock_method) {
+        setUnlockMethod(vaultData.unlock_method as 'pin' | 'passkey' | 'both')
+      } else {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('vault_envelope_pin, vault_envelope_passkey')
+          .eq('id', userId)
+          .maybeSingle()
+        
+        if (profileData) {
+          const hasPin = !!profileData.vault_envelope_pin
+          const hasPasskey = !!profileData.vault_envelope_passkey
+          if (hasPin && hasPasskey) {
+            setUnlockMethod('both')
+          } else if (hasPin) {
+            setUnlockMethod('pin')
+          } else if (hasPasskey) {
+            setUnlockMethod('passkey')
+          } else {
+            setUnlockMethod(null)
+          }
+        } else {
+          setUnlockMethod(null)
+        }
+      }
+    } catch {
+      setUnlockMethod(null)
+    }
+  }, [setUnlockMethod])
+
+  useEffect(() => {
+    let active = true
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session || !session.user) {
+        navigate('/auth/login', { replace: true })
+        return
+      }
+
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .maybeSingle()
+
+      if (active) {
+        if (profileRow && profileRow.role === 'issuer') {
+          navigate('/app/dashboard', { replace: true })
+          return
+        }
+        setCurrentUser(session.user)
+        loadData(session.user)
+        fetchUnlockMethod(session.user.id)
+      }
+    }
+    init()
+    return () => { active = false }
+  }, [navigate, loadData, fetchUnlockMethod])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Do nothing on visibility change — preserve all state
+      // The vault session key is in a ref so it survives
+      if (document.visibilityState === 'visible') {
+        // If we were already unlocked and had decryptedSDJwt,
+        // don't reset anything — just stay on current step
+        return
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (decryptedSDJwt && (!searchParams.get('step') || searchParams.get('step') === 'locked')) {
+      setSearchParams({ step: 'sharing' }, { replace: true })
+    }
+  }, [decryptedSDJwt, searchParams, setSearchParams])
+
+  // --- VAULT UNLOCK & DECRYPTION FLOW ---
+  const handleUnlockSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!currentUser || !credential) return
+
+    try {
+      setIsUnlocking(true)
+      setUnlockError(null)
+
+      const success = await unlockWithPin(pinInput, currentUser.id)
+      if (success) {
+        setShowUnlockModal(false)
+        setIsUnlocking(false)
+        setPendingDecryptAfterUnlock(true)
+      } else {
+        setUnlockError('Vault unlock failed. Please check your PIN.')
+        setIsUnlocking(false)
+      }
+    } catch {
+      setUnlockError('Unlock failed. Please try again.')
+      setIsUnlocking(false)
+    }
+  }
+
+  const handleUnlockWithPasskeyClick = async () => {
+    if (!currentUser || !credential) return
+    try {
+      setIsUnlocking(true)
+      setUnlockError(null)
+
+      const success = await unlockWithPasskey(currentUser.id)
+      if (success) {
+        setShowUnlockModal(false)
+        setIsUnlocking(false)
+        setPendingDecryptAfterUnlock(true)
+      } else {
+        setUnlockError('Passkey authentication failed.')
+        setIsUnlocking(false)
+      }
+    } catch {
+      setUnlockError('Passkey failed.')
+      setIsUnlocking(false)
+    }
+  }
+
+
+
+  useEffect(() => {
+    if (isUnlocked && pendingDecryptAfterUnlock && credential) {
+      setPendingDecryptAfterUnlock(false)
+      decryptCredential(credential)
+    }
+  }, [isUnlocked, pendingDecryptAfterUnlock, credential])
+
+  const decryptCredential = async (cred: Credential) => {
+    try {
+      let sdjwtString = ''
+
+      if (cred.cipher && cred.iv) {
+        // Fallback schema.sql: Decrypt using cipher and iv
+        const decrypted = await decryptPayload({ cipher: cred.cipher, iv: cred.iv }) as { sdjwt: string }
+        sdjwtString = decrypted.sdjwt
+      } else {
+        // Prompt custom schema: Decrypt the parsed sd_jwt JSON string
+        const parsedPayload = JSON.parse(cred.sd_jwt)
+        const decrypted = await decryptPayload(parsedPayload) as { sdjwt: string }
+        sdjwtString = decrypted.sdjwt
+      }
+
+      setDecryptedSDJwt(sdjwtString)
+
+      // Decode disclosures to show claims
+      const disclosures = readDisclosures(sdjwtString)
+      const claims: Record<string, any> = {}
+      disclosures.forEach(d => {
+        claims[d.name] = d.value
+      })
+
+      // Try extraction fallback from headers if disclosures are salt-only
+      try {
+        const payload = JSON.parse(atob(sdjwtString.split('~')[0].split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+        const fieldsToExtract = ['name', 'year', 'gpa', 'national_id', 'notes', 'student_id', 'email', 'degree_type', 'major', 'graduation_date', 'certificate_id', 'photo']
+        fieldsToExtract.forEach(f => {
+          if (claims[f] === undefined && payload[f] !== undefined) {
+            claims[f] = payload[f]
+          }
+        })
+      } catch {}
+
+      setAvailableClaims(claims)
+      const fieldsToSelect = ['name', 'year', 'email', 'student_id', 'graduation_date', 'certificate_id', 'photo', 'gpa', 'national_id', 'notes'].filter(f => claims[f] !== undefined && claims[f] !== '')
+      setSelectedFields(fieldsToSelect)
+    } catch {
+      setUnlockError('Failed to decrypt credential. Your vault key may have changed.')
+      setShowUnlockModal(true)
+    }
+  }
+
+  // --- SELECTIVE DISCLOSURE SELECTION ---
+  const toggleSelectableField = (field: string) => {
+    if (selectedFields.includes(field)) {
+      setSelectedFields(prev => prev.filter(f => f !== field))
+    } else {
+      setSelectedFields(prev => [...prev, field])
+    }
+  }
+
+  // Count fields
+  // Always visible: Degree, Institution, Issuer DID, Issue date (4 fields)
+  // Selectable: Name, Year, GPA, National ID, Notes, Email, Student ID, Graduation Date, Certificate ID, Photo
+  const selectableKeys = ['name', 'year', 'gpa', 'national_id', 'notes', 'student_id', 'email', 'graduation_date', 'certificate_id', 'photo']
+  const totalFields = 4 + Object.keys(availableClaims).filter(k => selectableKeys.includes(k) && availableClaims[k] !== undefined && availableClaims[k] !== '').length
+  const disclosedFieldsCount = 4 + selectedFields.filter(f => availableClaims[f] !== undefined && availableClaims[f] !== '').length
+  
+  const hiddenFields = selectableKeys
+    .filter(f => availableClaims[f] !== undefined && availableClaims[f] !== '' && !selectedFields.includes(f))
+    .map(f => {
+      if (f === 'name') return 'Full name'
+      if (f === 'year') return 'Graduation year'
+      if (f === 'gpa') return 'GPA'
+      if (f === 'national_id') return 'National ID'
+      if (f === 'notes') return 'Additional notes'
+      if (f === 'email') return 'Email address'
+      if (f === 'student_id') return 'Student ID'
+      if (f === 'graduation_date') return 'Graduation date'
+      if (f === 'certificate_id') return 'Certificate ID'
+      if (f === 'photo') return 'Student photo'
+      return f
+    })
+
+  // --- GENERATE SHARE LINK FLOW ---
+  const handleCreateShare = async () => {
+    if (!decryptedSDJwt || !credential || !currentUser) return
+
+    try {
+      setIsSharing(true)
+      setShareError(null)
+
+      const limit = await checkRateLimit(currentUser.id, 'credential/share', 50, 1440)
+      if (!limit.allowed) {
+        setShareError('Daily sharing limit reached. Please try again tomorrow.')
+        setIsSharing(false)
+        return
+      }
+
+      // Step A: Build the presentation
+      // The degree and institution claims must always be visible in addition to selection
+      const revealNames = ['degree', 'institution', 'degree_type', 'major', 'iss', 'iat', 'exp', ...selectedFields]
+      const presentationStr = present(decryptedSDJwt, revealNames)
+
+      // Step B: Generate UUID token
+      const token = crypto.randomUUID()
+      const expiry = calculateExpiryDate()
+
+      // Step C: Save to Supabase
+      const res = await supabase.from('shares').insert({
+        id: token,
+        owner: currentUser.id,
+        presentation: presentationStr,
+        issuer_did: credential.issuer_did || '',
+        revealed: selectedFields,
+        expires_at: expiry.toISOString(),
+        created_at: new Date().toISOString()
+      })
+
+      if (res.error) {
+        console.error('[share] insert error:', res.error)
+        throw res.error
+      }
+
+      const shareRecord: ShareRecord = {
+        id: token,
+        owner: currentUser.id,
+        presentation: presentationStr,
+        issuer_did: credential.issuer_did || '',
+        revealed: selectedFields,
+        expires_at: expiry.toISOString(),
+        created_at: new Date().toISOString()
+      }
+
+      setCreatedShare(shareRecord)
+      setPastShares(prev => [shareRecord, ...prev])
+      setIsSharing(false)
+      setSearchParams({ step: 'success' })
+    } catch (err: any) {
+      setShareError(err.message || 'Failed to create share link. Please try again.')
+      setIsSharing(false)
+    }
+  }
+
+  // Copy helper
+  const handleCopyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedStates(prev => ({ ...prev, [id]: true }))
+    setTimeout(() => {
+      setCopiedStates(prev => ({ ...prev, [id]: false }))
+    }, 2000)
+  }
+
+  // PNG QR Code Download helper
+  const handleDownloadQR = () => {
+    const svgEl = document.getElementById('qr-code-svg')
+    if (!svgEl) return
+
+    const svgXml = new XMLSerializer().serializeToString(svgEl)
+    const svgBase64 = window.btoa(unescape(encodeURIComponent(svgXml)))
+    const imgSource = `data:image/svg+xml;base64,${svgBase64}`
+
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 300
+      canvas.height = 300
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, 300, 300)
+        ctx.drawImage(img, 10, 10, 280, 280)
+        const a = document.createElement('a')
+        a.download = `credential-qr-${credentialId?.slice(0, 8)}.png`
+        a.href = canvas.toDataURL('image/png')
+        a.click()
+      }
+    }
+    img.src = imgSource
+  }
+
+  // Revoke past share link
+  const handleRevokeShare = async (shareId: string) => {
+    try {
+      const { error } = await supabase
+        .from('shares')
+        .delete()
+        .eq('id', shareId)
+
+      if (error) throw error
+
+      setPastShares(prev => prev.filter(s => s.id !== shareId))
+      if (createdShare?.id === shareId) {
+        setCreatedShare(null)
+      }
+    } catch {
+      alert('Failed to revoke link. Please try again.')
+    }
+  }
+
+  // --- RENDER GATES ---
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <style>{spinStyles}</style>
+        <div style={{
+          width: 40,
+          height: 40,
+          border: '4px solid var(--forest-soft)',
+          borderTop: '4px solid var(--forest)',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <p className="muted" style={{ marginTop: '1rem' }}>Loading credential...</p>
+      </div>
+    )
+  }
+
+  // Gate 1: Not Found
+  if (loadError === 'not_found') {
+    return (
+      <div className="max-w-2xl mx-auto text-center" style={{ maxWidth: '36rem', margin: '3rem auto' }}>
+        <div className="card" style={{ padding: '2.5rem 2rem' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
+          <h2 style={{ fontSize: '1.5rem', color: 'var(--danger)', marginTop: 0 }}>Credential not found</h2>
+          <p className="muted" style={{ marginBottom: '2rem' }}>
+            This credential does not exist or does not belong to your account.
+          </p>
+          <button className="primary" onClick={() => navigate('/app/wallet')}>
+            Back to wallet
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Gate 2: Not Claimed
+  if (loadError === 'not_claimed') {
+    return (
+      <div className="max-w-2xl mx-auto" style={{ maxWidth: '36rem', margin: '3rem auto' }}>
+        <div className="card" style={{ padding: '2.5rem 2rem', borderLeft: '5px solid var(--gold)', backgroundColor: '#fdfbf7' }}>
+          <h2 style={{ fontSize: '1.4rem', color: 'var(--gold)', marginTop: 0 }}>Credential not claimed yet</h2>
+          <p className="muted" style={{ marginBottom: '2rem' }}>
+            You need to claim this credential into your encrypted vault before you can selectively disclose and share its fields.
+          </p>
+          <button className="primary" onClick={() => navigate('/app/wallet')} style={{ backgroundColor: 'var(--gold)', border: 'none' }}>
+            Go to wallet to claim
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Gate 3: Loading Error
+  if (loadError === 'error') {
+    return (
+      <div className="max-w-2xl mx-auto text-center" style={{ maxWidth: '36rem', margin: '3rem auto' }}>
+        <div className="card" style={{ padding: '2.5rem 2rem' }}>
+          <h2 style={{ fontSize: '1.4rem', color: 'var(--danger)', marginTop: 0 }}>An error occurred</h2>
+          <p className="muted" style={{ marginBottom: '2rem' }}>
+            Failed to load credential information. Please check your network and try again.
+          </p>
+          <button className="primary" onClick={() => window.location.reload()}>
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Truncate DID
+  const truncateDid = (did: string) => {
+    if (did.length <= 30) return did
+    return did.slice(0, 30) + '...'
+  }
+
+  const generatedShareUrl = createdShare ? `${window.location.origin}/verify/${createdShare.id}` : ''
+
+  return (
+    <div className="max-w-2xl mx-auto" style={{ maxWidth: '42rem', margin: '0 auto', fontFamily: 'inherit' }}>
+      <style>{spinStyles}</style>
+
+      {/* Back Link */}
+      <Link to="/app/wallet" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem', color: 'var(--muted)', textDecoration: 'none', marginBottom: '1.25rem' }}>
+        ← Back to wallet
+      </Link>
+
+      {/* Heading */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>Share credential</h2>
+        <p className="muted" style={{ margin: 0, fontSize: '0.95rem' }}>
+          Choose what to reveal and how long the link stays active
+        </p>
+      </div>
+
+      {/* =======================================================
+          1. CREDENTIAL SUMMARY CARD
+         ======================================================= */}
+      {credential && (
+        <div className="card" style={{ backgroundColor: 'var(--paper)', border: '1px solid var(--line)', padding: '1.25rem', marginBottom: '1.5rem' }}>
+          <strong style={{ fontSize: '1.1rem', color: 'var(--ink)', display: 'block', marginBottom: '0.15rem' }}>
+            {credential.degree_title}
+          </strong>
+          <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: '0.75rem' }}>
+            {credential.institution_name}
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', fontSize: '0.78rem', color: 'var(--muted)' }}>
+            <div>
+              <span>Issued on: </span>
+              <strong>{new Date(credential.created_at).toLocaleDateString()}</strong>
+            </div>
+            <div>
+              <span>Issuer DID: </span>
+              <code className="mono" style={{ color: 'var(--forest)' }}>
+                {truncateDid(credential.issuer_did)}
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================
+          2. STEP 1: UNLOCK VAULT CARD
+         ======================================================= */}
+      {!decryptedSDJwt && (
+        <div className="card text-center" style={{ padding: '2.5rem 1.5rem', background: '#fff' }}>
+          <div style={{ color: '#4f46e5', fontSize: '2.5rem', marginBottom: '0.5rem' }}>
+            <Lock size={36} style={{ margin: '0 auto' }} />
+          </div>
+          <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>Unlock your vault to continue</h3>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1.5rem', maxWidth: '320px', margin: '0.5rem auto 1.5rem' }}>
+            {unlockMethod === 'passkey' || unlockMethod === 'biometric'
+              ? 'Tap "Unlock vault" — your device will ask for biometric confirmation.'
+              : 'Enter your vault PIN to select which fields to share.'}
+          </p>
+          <button 
+            className="primary"
+            onClick={async () => {
+              if (unlockMethod === 'passkey' || unlockMethod === 'biometric') {
+                // Skip modal — fire biometric directly
+                if (!currentUser || !credential) return
+                try {
+                  setIsUnlocking(true)
+                  setUnlockError(null)
+                  const success = await unlockWithPasskey(currentUser.id)
+                  if (success) {
+                    setPendingDecryptAfterUnlock(true)
+                  } else {
+                    setUnlockError('Biometric authentication failed.')
+                    setShowUnlockModal(true) // only show on failure
+                  }
+                } catch {
+                  setUnlockError('Biometric failed. Try again.')
+                  setShowUnlockModal(true) // only show on failure
+                } finally {
+                  setIsUnlocking(false)
+                }
+              } else {
+                // PIN user → open modal as normal
+                setShowUnlockModal(true)
+              }
+            }}
+            disabled={isUnlocking}
+            style={{ 
+              display: 'block',
+              width: '100%', 
+              maxWidth: '240px', 
+              margin: '0 auto',
+              backgroundColor: '#4f46e5', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '8px', 
+              padding: '0.75rem 1rem', 
+              cursor: isUnlocking ? 'not-allowed' : 'pointer',
+              fontSize: '0.95rem',
+              fontWeight: 600
+            }}
+          >
+            {isUnlocking ? 'Authenticating...' : 'Unlock vault'}
+          </button>
+        </div>
+      )}
+
+      {/* =======================================================
+          3. MAIN SHARING INTERFACE (UNLOCKED)
+         ======================================================= */}
+      {decryptedSDJwt && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          
+          {/* Progress Indicator */}
+          <div className="w-full max-w-xl mx-auto mb-4 bg-stone-50 border border-stone-200/85 rounded-2xl p-4 shadow-sm text-left">
+            <div className="relative flex items-center justify-between">
+              <div className="absolute left-8 right-8 top-1/2 -translate-y-1/2 h-0.5 bg-stone-200" style={{ left: '2rem', right: '2rem' }} />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 h-0.5 bg-indigo-500 transition-all duration-300"
+                style={{ 
+                  left: '2rem', 
+                  width: step === 'success' ? 'calc(100% - 4rem)' : '0%'
+                }}
+              />
+
+              {/* Step 1: Configure */}
+              <div className="relative flex flex-col items-center gap-1 z-10">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                  step === 'success' 
+                    ? 'bg-emerald-500 border-emerald-500 text-white' 
+                    : 'bg-indigo-600 border-indigo-600 text-white'
+                }`}>
+                  {step === 'success' ? '✓' : '1'}
+                </div>
+                <span className="text-[11px] font-bold tracking-tight text-indigo-650">
+                  Configure
+                </span>
+              </div>
+
+              {/* Step 2: Generate */}
+              <div className="relative flex flex-col items-center gap-1 z-10">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                  step === 'success' 
+                    ? 'bg-indigo-600 border-indigo-600 text-white' 
+                    : 'bg-white border-stone-300 text-stone-400'
+                }`}>
+                  {step === 'success' ? '✓' : '2'}
+                </div>
+                <span className={`text-[11px] font-bold tracking-tight ${
+                  step === 'success' ? 'text-indigo-650' : 'text-stone-400'
+                }`}>
+                  Generate
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Status Pill */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="pill ok" style={{ backgroundColor: '#e2efe7', color: 'var(--ok)', fontWeight: 600, padding: '0.25rem 0.65rem' }}>
+              ✓ Vault unlocked
+            </span>
+          </div>
+
+          {/* STEP 2: CONFIGURE SHARE SETTINGS */}
+          {step === 'sharing' && decryptedSDJwt && (
+            <>
+              {/* FIELD PICKER */}
+              <div className="card" style={{ padding: '1.5rem', background: '#fff', textAlign: 'left' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>
+                  Choose what to share
+                </h3>
+                <p className="muted" style={{ fontSize: '0.82rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
+                  The employer will only see the fields you select. Hidden fields are mathematically absent from the share link.
+                </p>
+
+                {/* Field Rows */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', border: '1px solid var(--line)', borderRadius: '8px', overflow: 'hidden' }}>
+                  
+                  {/* ALWAYS SHOWN: Issuer DID */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={14} style={{ color: 'var(--muted)' }} />
+                      <span style={{ fontWeight: 600 }}>Issuer DID</span>
+                      <code className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem' }}>
+                        {truncateDid(credential?.issuer_did || '')}
+                      </code>
+                    </div>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                  </div>
+
+                  {/* ALWAYS SHOWN: Institution */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={14} style={{ color: 'var(--muted)' }} />
+                      <span style={{ fontWeight: 600 }}>Institution name</span>
+                      <span style={{ color: 'var(--muted)' }}>
+                        {credential?.institution_name}
+                      </span>
+                    </div>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                  </div>
+
+                  {/* ALWAYS SHOWN: Degree */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={14} style={{ color: 'var(--muted)' }} />
+                      <span style={{ fontWeight: 600 }}>Degree title</span>
+                      <span style={{ color: 'var(--muted)' }}>
+                        {credential?.degree_title}
+                      </span>
+                    </div>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                  </div>
+
+                  {/* ALWAYS SHOWN: Issue date */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={14} style={{ color: 'var(--muted)' }} />
+                      <span style={{ fontWeight: 600 }}>Issue date</span>
+                      <span style={{ color: 'var(--muted)' }}>
+                        {credential && new Date(credential.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                  </div>
+
+                  {/* SELECTABLE: Full name */}
+                  {availableClaims.name !== undefined && availableClaims.name !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('name')} 
+                          onChange={() => toggleSelectableField('name')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Full name</strong>
+                        <span className="muted">{availableClaims.name}</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Student Email */}
+                  {availableClaims.email !== undefined && availableClaims.email !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('email')} 
+                          onChange={() => toggleSelectableField('email')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Student Email</strong>
+                        <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.email}</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Student ID */}
+                  {availableClaims.student_id !== undefined && availableClaims.student_id !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('student_id')} 
+                          onChange={() => toggleSelectableField('student_id')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Student ID</strong>
+                        <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.student_id}</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Completion Year */}
+                  {availableClaims.year !== undefined && availableClaims.year !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('year')} 
+                          onChange={() => toggleSelectableField('year')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Graduation year</strong>
+                        <span className="muted">{availableClaims.year}</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Graduation Date */}
+                  {availableClaims.graduation_date !== undefined && availableClaims.graduation_date !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('graduation_date')} 
+                          onChange={() => toggleSelectableField('graduation_date')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Graduation date</strong>
+                        <span className="muted">
+                          {new Date(availableClaims.graduation_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Certificate ID */}
+                  {availableClaims.certificate_id !== undefined && availableClaims.certificate_id !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0, width: '100%' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('certificate_id')} 
+                          onChange={() => toggleSelectableField('certificate_id')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Certificate ID</strong>
+                        <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.certificate_id}</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Certificate Photo */}
+                  {(availableClaims.photo || availableClaims.student_photo) && (
+                    <div
+                      style={{
+                        border: selectedFields.includes('photo') || selectedFields.includes('student_photo')
+                          ? '2px solid #4f46e5' 
+                          : '1.5px solid #e7e5e4',
+                        borderRadius: '10px',
+                        padding: '0.75rem 1rem',
+                        cursor: 'pointer',
+                        background: selectedFields.includes('photo') || selectedFields.includes('student_photo')
+                          ? '#f0f0ff' 
+                          : '#fff',
+                        transition: 'all 0.15s',
+                        marginBottom: '1rem'
+                      }}
+                      onClick={() => {
+                        if (availableClaims.photo) toggleSelectableField('photo')
+                        if (availableClaims.student_photo) toggleSelectableField('student_photo')
+                      }}
+                    >
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem' 
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedFields.includes('photo') || selectedFields.includes('student_photo')}
+                          onChange={() => {
+                            if (availableClaims.photo) toggleSelectableField('photo')
+                            if (availableClaims.student_photo) toggleSelectableField('student_photo')
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ width: 16, height: 16, accentColor: '#4f46e5', cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ 
+                            fontSize: '0.85rem', 
+                            fontWeight: 600, 
+                            color: 'var(--ink)',
+                            marginBottom: '0.35rem'
+                          }}>
+                            Certificate photo / scan
+                          </div>
+                          <div style={{ 
+                            fontSize: '0.75rem', 
+                            color: 'var(--muted)' 
+                          }}>
+                            Share the actual certificate image with the employer
+                          </div>
+                        </div>
+                        {(availableClaims.photo || availableClaims.student_photo) && (() => {
+                          const val = availableClaims.photo || availableClaims.student_photo;
+                          return (
+                            <img
+                              src={val.startsWith('data:') || val.startsWith('http')
+                                ? val 
+                                : `data:image/jpeg;base64,${val}`}
+                              alt="Certificate"
+                              style={{
+                                width: 48,
+                                height: 48,
+                                objectFit: 'cover',
+                                borderRadius: 6,
+                                border: '1px solid #e7e5e4',
+                                flexShrink: 0
+                              }}
+                              onError={(e) => { 
+                                (e.target as HTMLImageElement).style.display = 'none' 
+                              }}
+                            />
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: GPA */}
+                  {availableClaims.gpa !== undefined && availableClaims.gpa !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('gpa')} 
+                          onChange={() => toggleSelectableField('gpa')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>GPA</strong>
+                        <span className="muted">{availableClaims.gpa}</span>
+                      </label>
+                      <span className="pill gold" style={{ fontSize: '0.65rem', backgroundColor: '#f4e9d4', color: 'var(--gold)', fontWeight: 600 }}>
+                        Sensitive
+                      </span>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: National ID */}
+                  {availableClaims.national_id !== undefined && availableClaims.national_id !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem', borderBottom: '1px solid var(--line)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('national_id')} 
+                          onChange={() => toggleSelectableField('national_id')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>National ID</strong>
+                        <span className="muted">{availableClaims.national_id}</span>
+                      </label>
+                      <span className="pill bad" style={{ fontSize: '0.65rem', backgroundColor: '#f3e0e0', color: 'var(--danger)', fontWeight: 600 }}>
+                        Private
+                      </span>
+                    </div>
+                  )}
+
+                  {/* SELECTABLE: Notes */}
+                  {availableClaims.notes !== undefined && availableClaims.notes !== '' && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', margin: 0 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFields.includes('notes')} 
+                          onChange={() => toggleSelectableField('notes')}
+                          style={{ width: 'auto' }}
+                        />
+                        <strong style={{ fontWeight: 600 }}>Additional notes</strong>
+                        <span className="muted" style={{ display: 'inline-block', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {availableClaims.notes}
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* LIVE FIELD PICKER SUMMARY */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', fontSize: '0.78rem', color: 'var(--muted)' }}>
+                  <span>Sharing {disclosedFieldsCount} of {totalFields} fields</span>
+                  {hiddenFields.length > 0 && (
+                    <span>Hidden: {hiddenFields.join(', ')}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* STEP 3: SET EXPIRY */}
+              <div className="card" style={{ padding: '1.5rem', background: '#fff', textAlign: 'left' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>
+                  How long should this link work?
+                </h3>
+                <p className="muted" style={{ fontSize: '0.82rem', marginBottom: '1.25rem' }}>
+                  Choose a quick duration or set a custom expiry window.
+                </p>
+
+                {/* Duration choices row */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                  {['1day', '7days', '30days', '90days', 'custom'].map((opt) => {
+                    const isSelected = expiryOption === opt
+                    const labels: Record<string, string> = {
+                      '1day': '1 Day',
+                      '7days': '7 Days',
+                      '30days': '30 Days',
+                      '90days': '90 Days',
+                      'custom': 'Custom'
+                    }
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setExpiryOption(opt as ExpiryOption)}
+                        style={{
+                          padding: '0.45rem 0.25rem',
+                          fontSize: '0.85rem',
+                          fontWeight: 600,
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          border: isSelected ? '2px solid #4f46e5' : '1px solid var(--line)',
+                          backgroundColor: isSelected ? '#f5f3ff' : '#fff',
+                          color: isSelected ? '#4f46e5' : 'var(--muted)',
+                          textAlign: 'center'
+                        }}
+                      >
+                        {labels[opt]}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Custom Date Picker (when selected) */}
+                {expiryOption === 'custom' && (
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '0.82rem', marginBottom: '0.4rem', display: 'block' }}>
+                      Choose expiration date
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="date"
+                        value={customDate}
+                        min={new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0]} // tomorrow
+                        max={new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]} // 1 year
+                        onChange={(e) => setCustomDate(e.target.value)}
+                        style={{ paddingLeft: '2.5rem' }}
+                      />
+                      <Calendar size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--muted)' }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Calculated expiry string */}
+                <div style={{ fontSize: '0.85rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.25rem' }}>
+                  <Clock size={15} />
+                  <span>
+                    Link expires on: <strong>{liveExpiry.toLocaleString()}</strong>
+                  </span>
+                </div>
+
+                {/* Gray Warning box */}
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', padding: '0.8rem 1rem', backgroundColor: 'var(--paper)', borderRadius: '8px', border: '1px solid var(--line)', fontSize: '0.78rem', color: 'var(--muted)', lineHeight: '1.4' }}>
+                  <AlertTriangle size={16} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: '0.1rem' }} />
+                  <p style={{ margin: 0 }}>
+                    After expiry, this link stops working. The employer cannot re-open it. You can always create a new share link.
+                  </p>
+                </div>
+              </div>
+
+              {/* SUBMIT BUTTON */}
+              {shareError && (
+                <div className="notice err" style={{ margin: 0, padding: '0.6rem 1rem' }}>
+                  {shareError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleCreateShare}
+                disabled={isSharing || selectedFields.length === 0}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  fontSize: '1rem',
+                  fontWeight: 600,
+                  borderRadius: '8px',
+                  border: 'none',
+                  color: '#fff',
+                  backgroundColor: selectedFields.length === 0 ? '#cbd5e1' : '#4f46e5',
+                  cursor: selectedFields.length === 0 || isSharing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  boxShadow: 'var(--shadow)',
+                  margin: '0 0 1rem 0'
+                }}
+              >
+                {isSharing && (
+                  <div style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
+                )}
+                <span>Create share link</span>
+              </button>
+            </>
+          )}
+
+          {/* STEP 3: SUCCESS SHARE LINK */}
+          {step === 'success' && createdShare && (
+            <div className="card" style={{ borderLeft: '4px solid #10b981', padding: '1.5rem', background: '#fff', display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'left' }}>
+              
+              {/* Title Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CheckCircle size={20} style={{ color: '#10b981' }} />
+                <h3 style={{ margin: 0, color: '#10b981', fontSize: '1.1rem', fontWeight: 600 }}>
+                  Share link created
+                </h3>
+              </div>
+
+              {/* Share URL text box with buttons */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <code 
+                  className="mono" 
+                  style={{ 
+                    flex: 1, 
+                    minWidth: '220px', 
+                    padding: '0.6rem 0.8rem', 
+                    backgroundColor: 'var(--paper)', 
+                    border: '1px solid var(--line)', 
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    wordBreak: 'break-all'
+                  }}
+                >
+                  {generatedShareUrl}
+                </code>
+                
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => handleCopyText(generatedShareUrl, 'main')}
+                    style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem', margin: 0 }}
+                  >
+                    <Copy size={14} />
+                    <span>{copiedStates['main'] ? 'Copied!' : 'Copy link'}</span>
+                  </button>
+
+                  <a
+                    href={generatedShareUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ghost"
+                    style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', textDecoration: 'none', border: '1px solid var(--line)', borderRadius: '8px', color: 'var(--ink)' }}
+                  >
+                    <ExternalLink size={14} />
+                    <span>Open</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* QR Code Container */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem', border: '1px solid var(--line)', borderRadius: '8px', backgroundColor: '#fff', maxWidth: '240px', margin: '0 auto' }}>
+                <QRCodeSVG 
+                  value={generatedShareUrl} 
+                  size={180} 
+                  id="qr-code-svg" 
+                  style={{ display: 'block' }}
+                />
+              </div>
+
+              {/* QR / Share Options Row */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={handleDownloadQR}
+                  style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}
+                >
+                  <Download size={14} />
+                  <span>Download QR PNG</span>
+                </button>
+
+                <a
+                  href={`mailto:?subject=${encodeURIComponent('My Actik credential')}&body=${encodeURIComponent(`Here is the verify link to my Actik digital credential: ${generatedShareUrl}`)}`}
+                  className="ghost"
+                  style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', textDecoration: 'none', border: '1px solid var(--line)', borderRadius: '8px', color: 'var(--ink)' }}
+                >
+                  <Mail size={14} />
+                  <span>Email employer</span>
+                </a>
+              </div>
+
+              {/* Share Summary block */}
+              <div style={{ backgroundColor: 'var(--paper)', borderRadius: '8px', padding: '1rem', border: '1px solid var(--line)', fontSize: '0.8rem', lineHeight: '1.4' }}>
+                <div style={{ margin: '0 0 0.4rem' }}>
+                  <span className="muted">Disclosed fields: </span>
+                  <strong>{['Issuer DID', 'Institution', 'Degree title', 'Issue date', ...selectedFields.map(f => {
+                    if (f === 'name') return 'Full name'
+                    if (f === 'year') return 'Graduation year'
+                    if (f === 'gpa') return 'GPA'
+                    if (f === 'national_id') return 'National ID'
+                    if (f === 'notes') return 'Additional notes'
+                    if (f === 'email') return 'Email address'
+                    if (f === 'student_id') return 'Student ID'
+                    if (f === 'graduation_date') return 'Graduation date'
+                    if (f === 'certificate_id') return 'Certificate ID'
+                    if (f === 'photo') return 'Student photo'
+                    return f
+                  })].join(', ')}</strong>
+                </div>
+                {hiddenFields.length > 0 && (
+                  <div style={{ margin: '0 0 0.4rem' }}>
+                    <span className="muted">Hidden fields: </span>
+                    <strong style={{ color: 'var(--danger)' }}>{hiddenFields.join(', ')}</strong>
+                  </div>
+                )}
+                <div style={{ margin: '0 0 0.4rem' }}>
+                  <span className="muted">Expires: </span>
+                  <strong>{liveExpiry.toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span className="muted">Token: </span>
+                  <code className="mono">{createdShare.id.slice(0, 8)}...</code>
+                </div>
+              </div>
+
+              {/* Final Warning banner */}
+              <p className="muted" style={{ margin: 0, fontSize: '0.72rem', textAlign: 'center', color: 'var(--danger)' }}>
+                ⚠ Anyone with this link can verify your credential until it expires. Do not share it publicly.
+              </p>
+
+            </div>
+          )}
+
+          {/* STEP 3: FALLBACK WHEN ACCESSED DIRECTLY */}
+          {step === 'success' && !createdShare && (
+            <div className="card text-center" style={{ padding: '2.5rem 1.5rem', background: '#fff' }}>
+              <p className="muted" style={{ marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+                No active share link has been created during this session.
+              </p>
+              <button 
+                className="primary" 
+                onClick={() => setSearchParams({ step: 'sharing' })}
+                style={{ backgroundColor: '#4f46e5', border: 'none', borderRadius: '8px', padding: '0.6rem 1rem', color: '#fff', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 }}
+              >
+                Go to Configure step
+              </button>
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* =======================================================
+          5. PAST SHARE LINKS SECTION (Requirement 9)
+         ======================================================= */}
+      {decryptedSDJwt && (step === 'sharing' || step === 'success') && (
+        <div style={{ marginTop: '2.5rem', borderTop: '1px solid var(--line)', paddingTop: '1.5rem' }}>
+        <button
+          type="button"
+          onClick={() => setPastSharesOpen(!pastSharesOpen)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            color: 'var(--forest)',
+            fontSize: '1.1rem',
+            fontWeight: 600,
+            marginBottom: '1rem'
+          }}
+        >
+          <span>Previous share links ({pastShares.length})</span>
+          {pastSharesOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        </button>
+
+        {pastSharesOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {pastShares.length === 0 ? (
+              <p className="muted" style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
+                No share links generated for this credential yet.
+              </p>
+            ) : (
+              pastShares.map((share) => {
+                const isExpired = new Date(share.expires_at) < new Date()
+                const shareUrlStr = `${window.location.origin}/verify/${share.id}`
+                
+                // Map fields to labels
+                const labels = (share.revealed || []).map(f => {
+                  if (f === 'name') return 'Full name'
+                  if (f === 'year') return 'Graduation year'
+                  if (f === 'gpa') return 'GPA'
+                  if (f === 'national_id') return 'National ID'
+                  if (f === 'notes') return 'Additional notes'
+                  if (f === 'email') return 'Email address'
+                  if (f === 'student_id') return 'Student ID'
+                  if (f === 'graduation_date') return 'Graduation date'
+                  if (f === 'certificate_id') return 'Certificate ID'
+                  if (f === 'photo') return 'Student photo'
+                  return f
+                })
+                
+                return (
+                  <div
+                    key={share.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: 'var(--surface)',
+                      border: '1px solid var(--line)',
+                      borderRadius: '8px',
+                      padding: '0.75rem 1rem',
+                      fontSize: '0.82rem',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: '220px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                        <span className={`pill ${isExpired ? 'bad' : 'ok'}`} style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', backgroundColor: isExpired ? '#f3e0e0' : '#e2efe7', color: isExpired ? 'var(--danger)' : 'var(--ok)' }}>
+                          {isExpired ? 'Expired' : 'Active'}
+                        </span>
+                        <code className="mono" style={{ fontSize: '0.72rem' }}>{share.id.slice(0, 8)}...</code>
+                      </div>
+                      
+                      <div style={{ margin: '0.2rem 0' }}>
+                        <span className="muted">Fields: </span>
+                        <strong>{['Issuer DID', 'Institution', 'Degree', 'Issue date', ...labels].join(', ')}</strong>
+                      </div>
+                      
+                      <div className="muted" style={{ fontSize: '0.72rem' }}>
+                        Expires: {new Date(share.expires_at).toLocaleString()}
+                      </div>
+                    </div>
+
+                    {/* Quick copy / Revoke buttons */}
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleCopyText(shareUrlStr, share.id)}
+                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', margin: 0 }}
+                      >
+                        <Copy size={12} />
+                        <span>{copiedStates[share.id] ? 'Copied' : 'Copy'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRevokeShare(share.id)}
+                        style={{
+                          padding: '0.35rem 0.6rem',
+                          fontSize: '0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          backgroundColor: 'transparent',
+                          border: '1px solid var(--danger)',
+                          color: 'var(--danger)',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          margin: 0
+                        }}
+                      >
+                        <Trash2 size={12} />
+                        <span>Revoke</span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
+        </div>
+      )}
+
+      {/* =======================================================
+          MODAL: UNLOCK VAULT DIALOG
+         ======================================================= */}
+      {showUnlockModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem'
+          }}
+        >
+          <div className="card" style={{ maxWidth: '380px', width: '100%', padding: '2rem 1.5rem', textAlign: 'center', background: '#fff', margin: 0 }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔒</div>
+            <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>Unlock Your Vault</h3>
+            <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+              Your encryption keys are derived locally. Please unlock your vault to process this credential.
+            </p>
+
+            {unlockMethod === 'pin' && (
+              <form onSubmit={handleUnlockSubmit}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem', textAlign: 'left' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>Enter Vault PIN</label>
+                  <input
+                    type="password"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    placeholder="••••"
+                    required
+                    style={{ textAlign: 'center', fontSize: '1.1rem', padding: '0.6rem', width: '100%' }}
+                  />
+                </div>
+
+                {unlockError && (
+                  <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '0 0 1rem', fontWeight: 500 }}>
+                    {unlockError}
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={isUnlocking}
+                    style={{
+                      margin: 0,
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      backgroundColor: '#4f46e5',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.6rem 1rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isUnlocking && (
+                      <div style={{ animation: 'spin 1s linear infinite', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
+                    )}
+                    <span>Unlock with PIN</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      setShowUnlockModal(false)
+                      setPinInput('')
+                    }}
+                    disabled={isUnlocking}
+                    style={{ width: '100%', borderColor: 'transparent', color: 'var(--muted)', margin: 0 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {(unlockMethod === 'passkey' || unlockMethod === 'biometric') && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
+                {isUnlocking ? (
+                  <>
+                    <div style={{ 
+                      animation: 'spin 1s linear infinite', 
+                      width: 28, height: 28, 
+                      border: '3px solid rgba(79,70,229,0.2)', 
+                      borderTop: '3px solid #4f46e5', 
+                      borderRadius: '50%',
+                      margin: '0.5rem auto'
+                    }} />
+                    <p style={{ fontSize: '0.9rem', color: 'var(--forest)', fontWeight: 500, margin: 0 }}>
+                      Authenticating...
+                    </p>
+                    <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
+                      Complete the biometric prompt on your device
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
+                      Your device will ask for biometric confirmation.
+                    </p>
+                    {unlockError && (
+                      <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '0 0 0.5rem', fontWeight: 500 }}>
+                        {unlockError}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleUnlockWithPasskeyClick}
+                      disabled={isUnlocking}
+                      style={{ 
+                        width: '100%',
+                        backgroundColor: '#4f46e5',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '0.7rem 1rem',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      Try again
+                    </button>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => { setShowUnlockModal(false); setUnlockError(null) }}
+                  disabled={isUnlocking}
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: 'var(--muted)', 
+                    cursor: isUnlocking ? 'not-allowed' : 'pointer',
+                    fontSize: '0.9rem',
+                    opacity: isUnlocking ? 0.5 : 1
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {(unlockMethod === 'both' || unlockMethod === null) && (
+              <form onSubmit={handleUnlockSubmit}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem', textAlign: 'left' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>Enter Vault PIN</label>
+                  <input
+                    type="password"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    placeholder="••••"
+                    required
+                    style={{ textAlign: 'center', fontSize: '1.1rem', padding: '0.6rem', width: '100%' }}
+                  />
+                </div>
+
+                {unlockError && (
+                  <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '0 0 1rem', fontWeight: 500 }}>
+                    {unlockError}
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={isUnlocking}
+                    style={{
+                      margin: 0,
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      backgroundColor: '#4f46e5',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.6rem 1rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isUnlocking && (
+                      <div style={{ animation: 'spin 1s linear infinite', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
+                    )}
+                    <span>Unlock with PIN</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={handleUnlockWithPasskeyClick}
+                    disabled={isUnlocking}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      margin: 0
+                    }}
+                  >
+                    <span>🔑 Unlock with Passkey</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      setShowUnlockModal(false)
+                      setPinInput('')
+                    }}
+                    disabled={isUnlocking}
+                    style={{ width: '100%', borderColor: 'transparent', color: 'var(--muted)', margin: 0 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

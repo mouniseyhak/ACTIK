@@ -1,94 +1,17 @@
-:root {
-  --paper: #f6f3ec;
-  --surface: #fffdf8;
-  --ink: #1d2420;
-  --muted: #5f6b63;
-  --line: #d9d3c5;
-  --forest: #1b3a2f;
-  --forest-soft: #e4ede7;
-  --gold: #b07d2b;
-  --danger: #9a2f2f;
-  --ok: #2f6b46;
-  --radius: 12px;
-  --shadow: 0 1px 2px rgba(29, 36, 32, 0.06), 0 8px 24px rgba(29, 36, 32, 0.05);
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    overscroll-behavior: none;
+  }
+
+  input, select, textarea {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
 }
-
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: 'Public Sans', 'Noto Sans Khmer', system-ui, sans-serif;
-  line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
-}
-
-h1, h2, h3 { font-family: 'Fraunces', 'Noto Sans Khmer', serif; font-weight: 600; line-height: 1.15; }
-h1 { font-size: 1.7rem; margin: 0; }
-h2 { font-size: 1.25rem; margin: 0 0 0.6rem; }
-h3 { font-size: 1rem; margin: 0 0 0.4rem; }
-
-.app { max-width: 760px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
-
-header.top {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 1rem; padding: 0.4rem 0 1.1rem; border-bottom: 1px solid var(--line);
-  margin-bottom: 1.25rem;
-}
-.brand { display: flex; align-items: baseline; gap: 0.5rem; }
-.brand .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--gold); }
-.brand small { color: var(--muted); font-size: 0.8rem; }
-
-.tabs { display: flex; gap: 0.4rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-.tabs button {
-  border: 1px solid var(--line); background: var(--surface); color: var(--muted);
-  padding: 0.45rem 0.9rem; border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.9rem;
-}
-.tabs button.active { background: var(--forest); color: #fff; border-color: var(--forest); }
-
-.card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 1.1rem 1.15rem; box-shadow: var(--shadow); margin-bottom: 1rem;
-}
-
-label { display: block; font-size: 0.82rem; color: var(--muted); margin: 0.7rem 0 0.25rem; }
-input, select {
-  width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 8px;
-  font: inherit; background: #fff; color: var(--ink);
-}
-input:focus, select:focus { outline: 2px solid var(--forest-soft); border-color: var(--forest); }
-
-button.primary {
-  margin-top: 1rem; background: var(--forest); color: #fff; border: none; border-radius: 8px;
-  padding: 0.6rem 1.1rem; font: inherit; font-weight: 500; cursor: pointer;
-}
-button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost {
-  background: transparent; border: 1px solid var(--line); border-radius: 8px;
-  padding: 0.45rem 0.8rem; font: inherit; cursor: pointer; color: var(--ink);
-}
-
-.row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
-.muted { color: var(--muted); font-size: 0.9rem; }
-.mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.78rem; word-break: break-all; }
-
-.pill { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 500; }
-.pill.ok { background: #e2efe7; color: var(--ok); }
-.pill.bad { background: #f3e0e0; color: var(--danger); }
-.pill.gold { background: #f4e9d4; color: var(--gold); }
-
-.check { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; }
-.check input { width: auto; }
-
-.claim { display: flex; justify-content: space-between; gap: 1rem; padding: 0.4rem 0; border-bottom: 1px dashed var(--line); }
-.claim:last-child { border-bottom: none; }
-.claim .k { color: var(--muted); }
-.claim .v { font-weight: 500; text-align: right; }
-
-.notice { padding: 0.6rem 0.8rem; border-radius: 8px; font-size: 0.9rem; margin-top: 0.8rem; }
-.notice.err { background: #f6e6e6; color: var(--danger); }
-.notice.info { background: var(--forest-soft); color: var(--forest); }
-
-.result { text-align: center; padding: 1.4rem 1rem; }
-.result .big { font-family: 'Fraunces', serif; font-size: 1.5rem; margin: 0.3rem 0; }

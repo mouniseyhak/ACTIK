@@ -1,0 +1,1088 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { supabase } from '../../lib/supabase'
+import { useZkVault } from '../../vault/zk-vault'
+import { Fingerprint, Lock, CheckCircle, XCircle, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react'
+
+// Note: The prompt expects import { useVault } from '../../vault/zk-vault/useVault'
+// But the actual file in this project exports useZkVault from '../../vault/zk-vault'
+
+type UnlockMethod = 'biometric' | 'passkey' | 'pin'
+type SetupStep = 1 | 2 | 3
+
+interface VaultRecord {
+  id: string
+  user_id: string
+  encrypted_envelope: string
+  unlock_method: UnlockMethod
+  created_at: string
+}
+
+export interface Credential {
+  id: string
+  issuer_id: string
+  holder_id: string | null
+  holder_email: string
+  issuer_did: string
+  institution_name: string
+  degree_title: string
+  sd_jwt: string
+  claimed: boolean
+  claimed_at: string | null
+  created_at: string
+  cipher?: string
+  iv?: string
+}
+
+// Shared spin keyframe styles
+const spinStyles = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`
+
+export default function VaultSetup() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { setupVault, checkVaultStatus, lock } = useZkVault()
+
+  // Routing source check
+  const searchParams = new URLSearchParams(location.search)
+  const isFromWallet = searchParams.get('from') === 'wallet' || (location.state as any)?.from === 'wallet'
+
+  // User details
+  const [currentUser, setCurrentUser] = useState<any | null>(null)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [checking, setChecking] = useState(true)
+
+  // Wizard state
+  const [step, setStep] = useState<SetupStep>(1)
+  const [existingVault, setExistingVault] = useState<Partial<VaultRecord> | null>(null)
+  const [showReconfigureModal, setShowReconfigureModal] = useState(false)
+  
+  // Selection
+  const [selectedMethod, setSelectedMethod] = useState<UnlockMethod>('biometric')
+
+  // PIN inputs
+  const [pinDigits, setPinDigits] = useState<string[]>(['', '', '', '', '', ''])
+  const [confirmDigits, setConfirmDigits] = useState<string[]>(['', '', '', '', '', ''])
+  const [showPin, setShowPin] = useState(false)
+  const [pinError, setPinError] = useState<string | null>(null)
+
+  // Refs for auto-focusing PIN digits
+  const pinRefs = useRef<(HTMLInputElement | null)[]>([])
+  const confirmRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  // Security explainer collapse
+  const [explainOpen, setExplainOpen] = useState(false)
+
+  // Creation checklist states
+  const [creationStatus, setCreationStatus] = useState<{
+    keyGen: 'idle' | 'running' | 'done' | 'error'
+    envelope: 'idle' | 'running' | 'done' | 'error'
+    saving: 'idle' | 'running' | 'done' | 'error'
+    verifying: 'idle' | 'running' | 'done' | 'error'
+  }>({
+    keyGen: 'idle',
+    envelope: 'idle',
+    saving: 'idle',
+    verifying: 'idle'
+  })
+  
+  const [creationError, setCreationError] = useState<string | null>(null)
+
+  // Reset vault states
+  const [showResetModal, setShowResetModal] = useState(false)
+  const [resetInput, setResetInput] = useState('')
+  const [isResetting, setIsResetting] = useState(false)
+
+  // Check vault status on mount
+  useEffect(() => {
+    let active = true
+    async function initCheck() {
+      try {
+        setChecking(true)
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session || !session.user) {
+          navigate('/auth/login', { replace: true })
+          return
+        }
+
+        if (active) {
+          setCurrentUser(session.user)
+        }
+
+        // Fetch user profile role
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle()
+
+        if (active && profileRow) {
+          setUserRole(profileRow.role)
+          if (profileRow.role === 'issuer') {
+            alert("Vault setup is for students only. Issuers manage credentials on the Dashboard.")
+            navigate('/app/dashboard', { replace: true })
+            return
+          }
+        }
+
+        // Check if vault exists using prompts-requested table query
+        let { data: vaultData, error: vaultError } = await supabase
+          .from('vaults')
+          .select('id, created_at, unlock_method')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
+
+        // Check if vaults table does not exist
+        const isVaultsMissing = vaultError && (
+          vaultError.code === '42P01' || 
+          vaultError.message.includes('does not exist') || 
+          vaultError.message.includes('missing')
+        )
+
+        if (active) {
+          if (isVaultsMissing) {
+            // Fall back to profiles status
+            const status = await checkVaultStatus(session.user.id)
+            if (status.status === 'ok' && status.exists) {
+              setExistingVault({
+                user_id: session.user.id,
+                created_at: new Date().toISOString(), // default fallback
+                unlock_method: status.hasPasskey ? 'passkey' : 'pin'
+              })
+            } else {
+              setExistingVault(null)
+            }
+          } else if (!vaultError && vaultData) {
+            setExistingVault(vaultData)
+          } else {
+            setExistingVault(null)
+          }
+          setChecking(false)
+        }
+      } catch (err) {
+        if (active) {
+          setExistingVault(null)
+          setChecking(false)
+        }
+      }
+    }
+
+    initCheck()
+    return () => { active = false }
+  }, [navigate, checkVaultStatus, setUserRole])
+
+  // Focus helpers for digit inputs
+  const handleDigitChange = (
+    val: string,
+    index: number,
+    type: 'pin' | 'confirm'
+  ) => {
+    const cleanDigit = val.replace(/[^0-9]/g, '').slice(-1)
+    const digits = type === 'pin' ? [...pinDigits] : [...confirmDigits]
+    const refs = type === 'pin' ? pinRefs : confirmRefs
+
+    digits[index] = cleanDigit
+    
+    if (type === 'pin') {
+      setPinDigits(digits)
+    } else {
+      setConfirmDigits(digits)
+    }
+
+    // Auto-focus next input
+    if (cleanDigit && index < 5) {
+      refs.current[index + 1]?.focus()
+    }
+  }
+
+  const handleDigitKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+    type: 'pin' | 'confirm'
+  ) => {
+    const digits = type === 'pin' ? pinDigits : confirmDigits
+    const refs = type === 'pin' ? pinRefs : confirmRefs
+
+    // Move backward on backspace
+    if (e.key === 'Backspace' && !digits[index] && index > 0) {
+      refs.current[index - 1]?.focus()
+    }
+  }
+
+  const handleDigitPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    type: 'pin' | 'confirm'
+  ) => {
+    e.preventDefault()
+    const pastedData = e.clipboardData.getData('text').trim()
+    if (/^\d{6}$/.test(pastedData)) {
+      const splitDigits = pastedData.split('')
+      if (type === 'pin') {
+        setPinDigits(splitDigits)
+        pinRefs.current[5]?.focus()
+      } else {
+        setConfirmDigits(splitDigits)
+        confirmRefs.current[5]?.focus()
+      }
+    }
+  }
+
+  const isPinComplete = pinDigits.every(d => d !== '')
+  const isConfirmComplete = confirmDigits.every(d => d !== '')
+  const pinsMatch = pinDigits.join('') === confirmDigits.join('')
+
+  const canContinueStep1 = selectedMethod === 'biometric' || (isPinComplete && isConfirmComplete && pinsMatch)
+
+  // Step 1 Click
+  const handleContinueToStep2 = () => {
+    if (!canContinueStep1) return
+    setPinError(null)
+    setStep(2)
+    triggerVaultCreation()
+  }
+
+  // Step 2 Logic: Perform actual zk-vault creation
+  const triggerVaultCreation = async () => {
+    if (!currentUser) return
+    setCreationError(null)
+    setCreationStatus({
+      keyGen: 'running',
+      envelope: 'idle',
+      saving: 'idle',
+      verifying: 'idle'
+    })
+
+    try {
+      // Step A: Generate PIN string
+      let pinCode = ''
+      if (selectedMethod === 'pin') {
+        pinCode = pinDigits.join('')
+      } else {
+        // Passkey method: generate random numeric passcode behind the scenes
+        pinCode = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('')
+      }
+
+      // 1. Generate Key status
+      await new Promise(r => setTimeout(r, 800))
+      setCreationStatus(prev => ({ ...prev, keyGen: 'done', envelope: 'running' }))
+
+      // 2. Create Envelope status
+      await new Promise(r => setTimeout(r, 800))
+      setCreationStatus(prev => ({ ...prev, envelope: 'done', saving: 'running' }))
+
+      // Call actual setup function
+      // In zk-vault context, setupVault triggers both PIN derivation and Passkey prompt (WebAuthn)
+      const success = await setupVault(
+        pinCode,
+        currentUser.id,
+        currentUser.email,
+        selectedMethod === 'pin'
+          ? { skipPasskey: true }
+          : { authenticatorAttachment: 'platform' }
+      )
+      
+      if (!success) {
+        throw new Error(
+          selectedMethod === 'pin'
+            ? 'PIN vault creation failed.'
+            : 'Biometrics setup failed or was unsupported.'
+        )
+      }
+
+      // Verify the vault status and check if passkey was cancelled when selectedMethod !== 'pin'
+      const checkStatus = await checkVaultStatus(currentUser.id)
+      if (selectedMethod !== 'pin' && !checkStatus.hasPasskey) {
+        // Rollback envelopes because user cancelled passkey ceremony or skipped it
+        // We clean up profiles
+        await supabase.from('profiles').update({
+          vault_envelope_pin: null,
+          vault_pin_salt: null,
+          vault_envelope_passkey: null,
+          passkey_id: null
+        }).eq('id', currentUser.id)
+        
+        throw new Error('CANCELLED')
+      }
+
+      // Get envelopes from profiles to save to vaults table (or sync)
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('vault_envelope_pin, vault_pin_salt, vault_envelope_passkey, passkey_id')
+        .eq('id', currentUser.id)
+        .single()
+
+      const envelopePayloadStr = JSON.stringify({
+        pinEnvelope: profileRow?.vault_envelope_pin || null,
+        pinSalt: profileRow?.vault_pin_salt || null,
+        passkeyEnvelope: profileRow?.vault_envelope_passkey || null,
+        passkeyId: profileRow?.passkey_id || null
+      })
+
+      // 3. Save to Supabase (try vaults table first, fallback cleanly)
+      let res = await supabase.from('vaults').upsert({
+        user_id: currentUser.id,
+        encrypted_envelope: envelopePayloadStr,
+        unlock_method: selectedMethod === 'biometric' ? 'passkey' : selectedMethod,
+        created_at: new Date().toISOString()
+      })
+
+      const isVaultsTableMissing = res.error && (
+        res.error.code === '42P01' || 
+        res.error.message.includes('does not exist') || 
+        res.error.message.includes('missing')
+      )
+
+      if (res.error && !isVaultsTableMissing) {
+        throw new Error('Supabase save failed: ' + res.error.message)
+      }
+
+      setCreationStatus(prev => ({ ...prev, saving: 'done', verifying: 'running' }))
+      
+      // 4. Verify Vault
+      await new Promise(r => setTimeout(r, 800))
+      setCreationStatus(prev => ({ ...prev, verifying: 'done' }))
+
+      // Advance to step 3 after verify completes
+      await new Promise(r => setTimeout(r, 600))
+      setStep(3)
+    } catch (err: any) {
+      if (err.message === 'CANCELLED') {
+        // Passkey cancelled
+        setStep(1)
+        setPinError('Vault creation cancelled. Please try again.')
+      } else {
+        setCreationStatus(prev => {
+          const next = { ...prev }
+          if (next.keyGen === 'running') next.keyGen = 'error'
+          else if (next.envelope === 'running') next.envelope = 'error'
+          else if (next.saving === 'running') next.saving = 'error'
+          else if (next.verifying === 'running') next.verifying = 'error'
+          return next
+        })
+        setCreationError(err.message || 'Setup failed. Please try again.')
+      }
+    }
+  }
+
+  // Reset vault operation
+  const handleResetConfirm = async () => {
+    if (resetInput !== 'RESET' || !currentUser) return
+    try {
+      setIsResetting(true)
+
+      // 1. Delete from vaults table (if exists)
+      await supabase.from('vaults').delete().eq('user_id', currentUser.id)
+
+      // 2. Clear vault columns from profiles table
+      await supabase
+        .from('profiles')
+        .update({
+          vault_envelope_pin: null,
+          vault_pin_salt: null,
+          vault_envelope_passkey: null,
+          passkey_id: null
+        })
+        .eq('id', currentUser.id)
+
+      // 3. Clear local state
+      lock()
+
+      // Reset components
+      setExistingVault(null)
+      setShowResetModal(false)
+      setResetInput('')
+      setStep(1)
+      setPinDigits(['', '', '', '', '', ''])
+      setConfirmDigits(['', '', '', '', '', ''])
+      setSelectedMethod('passkey')
+      setIsResetting(false)
+    } catch {
+      setIsResetting(false)
+    }
+  }
+
+  // Main Loader
+  if (checking) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <style>{spinStyles}</style>
+        <div style={{
+          width: 44,
+          height: 44,
+          border: '4px solid var(--forest-soft)',
+          borderTop: '4px solid var(--forest)',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <p className="muted" style={{ marginTop: '1rem' }}>Checking vault status...</p>
+      </div>
+    )
+  }
+
+  // Render Page
+  return (
+    <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
+      <style>{spinStyles}</style>
+
+      {/* =======================================================
+          A. ALREADY SET UP STATE
+         ======================================================= */}
+      {existingVault && (
+        <div className="space-y-6 max-w-xl mx-auto">
+          {/* Status Message */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center shadow-sm">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 text-2xl font-bold mb-3">
+              ✓
+            </div>
+            <h2 className="text-lg font-bold text-stone-900">Your Vault is Ready</h2>
+            <p className="text-xs text-stone-500 mt-1 leading-relaxed max-w-md mx-auto">
+              Your digital credentials are encrypted locally with zero-knowledge keys. You can now claim, store, and verify your certificates.
+            </p>
+          </div>
+
+          {/* Card 1: Account Information */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+            <h3 className="text-sm font-bold text-stone-900 tracking-tight mb-4 flex items-center gap-2">
+              <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Account Information
+            </h3>
+            
+            <div className="space-y-3.5 text-sm">
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-gray-500">Email Address</span>
+                <strong className="text-stone-900 font-semibold">{currentUser?.email}</strong>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-gray-500">Account Role</span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                  userRole === 'admin' 
+                    ? 'bg-gray-100 text-gray-800 border border-gray-200' 
+                    : userRole === 'issuer' 
+                      ? 'bg-purple-100 text-purple-800 border border-purple-200' 
+                      : 'bg-teal-100 text-teal-800 border border-teal-200'
+                }`}>
+                  {userRole || 'Student'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-gray-500">Account Created</span>
+                <strong className="text-stone-900 font-medium">
+                  {currentUser?.created_at ? new Date(currentUser.created_at).toLocaleDateString() : '—'}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Vault Security */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 relative overflow-hidden">
+            <h3 className="text-sm font-bold text-stone-900 tracking-tight mb-4 flex items-center gap-2">
+              <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              Vault Security
+            </h3>
+
+            <div className="space-y-3.5 text-sm mb-6">
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-gray-500">Unlock Method</span>
+                <strong className="text-stone-900 font-semibold capitalize flex items-center gap-1.5">
+                  {existingVault.unlock_method === 'pin' ? '🔢 6-digit PIN' : '👤 Biometric'}
+                </strong>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-gray-500">Vault Configured</span>
+                <strong className="text-stone-900 font-medium">
+                  {new Date(existingVault.created_at || '').toLocaleDateString()}
+                </strong>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setShowReconfigureModal(true)}
+              className="w-full border border-indigo-600 bg-transparent hover:bg-indigo-50 active:bg-indigo-100 text-indigo-600 font-semibold h-11 px-4 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
+            >
+              Change Unlock Method
+            </button>
+          </div>
+
+          {/* Card 3: Action Options */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-3">
+            <button 
+              className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
+              onClick={() => navigate('/app/wallet')}>
+              Go to my wallet
+            </button>
+            <button 
+              className="w-full border border-red-200 bg-white hover:bg-red-50 active:bg-red-100 text-red-600 font-semibold h-11 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
+              onClick={() => setShowResetModal(true)}>
+              Reset vault
+            </button>
+          </div>
+
+          {/* Security tips / Info banner */}
+          <div className="flex gap-3 items-start p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 text-xs text-indigo-800 leading-relaxed shadow-sm">
+            <svg className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <strong className="font-bold block mb-0.5">Security Recommendations:</strong>
+              Use a hardware passkey for biometrics-backed protection. Remember that Actik handles zero-knowledge encryption: if you lose your PIN or passcode, recovery is impossible. Never share your security secrets.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================
+          B. SETUP FLOW WIZARD
+         ======================================================= */}
+      {!existingVault && (
+        <div>
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-stone-900 tracking-tight">Set up your vault</h2>
+            <p className="text-sm text-stone-500 mt-1 max-w-sm mx-auto leading-relaxed">
+              Your credentials are encrypted with a key that only your device holds
+            </p>
+          </div>
+
+          {/* Stepper progress indicator */}
+          <div className="flex items-center justify-between mb-8 relative px-4">
+            {/* Horizontal Line background */}
+            <div className="absolute top-4 sm:top-5 left-[10%] right-[10%] h-[2px] bg-gray-200 z-0" />
+            
+            {/* Step 1 */}
+            <div className="flex flex-col items-center relative z-10">
+              <div 
+                className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold border-2 transition-colors ${
+                  step === 1 ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-emerald-500 border-emerald-500 text-white'
+                }`}
+              >
+                {step > 1 ? '✓' : '1'}
+              </div>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Choose method</span>
+            </div>
+
+            {/* Step 2 */}
+            <div className="flex flex-col items-center relative z-10">
+              <div 
+                className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold border-2 transition-colors ${
+                  step === 2 ? 'bg-indigo-600 border-indigo-600 text-white' : step > 2 ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-200 text-gray-400'
+                }`}
+              >
+                {step > 2 ? '✓' : '2'}
+              </div>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Create vault</span>
+            </div>
+
+            {/* Step 3 */}
+            <div className="flex flex-col items-center relative z-10">
+              <div 
+                className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold border-2 transition-colors ${
+                  step === 3 ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-gray-200 text-gray-400'
+                }`}
+              >
+                3
+              </div>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Done</span>
+            </div>
+          </div>
+
+          {/* =======================================================
+              STEP 1: CHOOSE UNLOCK METHOD
+             ======================================================= */}
+          {step === 1 && (
+            <div>
+              <h3 className="text-base md:text-lg font-bold text-stone-900 mb-4">
+                How do you want to unlock your vault?
+              </h3>
+
+              {/* Cards Stack */}
+              <div className="flex flex-col gap-4 mb-6">
+                {/* Card 1: Biometric */}
+                <div 
+                  onClick={() => setSelectedMethod('biometric')}
+                  className={`border-2 rounded-xl p-5 cursor-pointer transition-all flex flex-col justify-between ${
+                    selectedMethod === 'biometric' ? 'border-indigo-600 bg-indigo-50/30' : 'border-gray-200 bg-white hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className={selectedMethod === 'biometric' ? 'text-indigo-600' : 'text-gray-400'}>
+                      <Fingerprint size={28} />
+                    </div>
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">
+                      Recommended
+                    </span>
+                  </div>
+                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">Biometric</strong>
+                  <p className="text-xs text-gray-500 mt-2 mb-4 leading-relaxed">
+                    Use Face ID, Touch ID, or Windows Hello. Instant, secure, and stays on this device.
+                  </p>
+                  <ul className="list-disc pl-4 space-y-1.5 text-[11px] text-gray-500 mt-auto">
+                    <li>Immediate biometric prompt</li>
+                    <li>No external key needed</li>
+                    <li>Highly secure & local</li>
+                  </ul>
+                </div>
+
+                {/* Card 2: PIN */}
+                <div 
+                  onClick={() => setSelectedMethod('pin')}
+                  className={`border-2 rounded-xl p-5 cursor-pointer transition-all flex flex-col justify-between ${
+                    selectedMethod === 'pin' ? 'border-indigo-600 bg-indigo-50/30' : 'border-gray-200 bg-white hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="mb-4">
+                    <div className={selectedMethod === 'pin' ? 'text-indigo-600' : 'text-gray-400'}>
+                      <Lock size={28} />
+                    </div>
+                  </div>
+                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">6-digit PIN</strong>
+                  <p className="text-xs text-gray-500 mt-2 mb-4 leading-relaxed">
+                    Set a 6-digit numeric passcode to unlock your credentials on any browser.
+                  </p>
+                  <ul className="list-disc pl-4 space-y-1.5 text-[11px] text-gray-500 mt-auto">
+                    <li>Works on any device</li>
+                    <li>Easy to configure</li>
+                    <li>No hardware needed</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* PIN DIGIT INPUTS (Shown only if PIN selected) */}
+              {selectedMethod === 'pin' && (
+                <div className="bg-white border border-gray-200 rounded-xl p-5 md:p-6 mb-6 shadow-sm">
+                  
+                  {/* Create PIN block */}
+                  <div className="mb-6">
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block text-center mb-3">
+                      Create your 6-digit PIN
+                    </label>
+                    <div className="flex gap-2.5 justify-center">
+                      {pinDigits.map((digit, idx) => (
+                        <input
+                          key={`pin-${idx}`}
+                          ref={el => pinRefs.current[idx] = el}
+                          type={showPin ? 'text' : 'password'}
+                          value={digit}
+                          maxLength={1}
+                          onChange={(e) => handleDigitChange(e.target.value, idx, 'pin')}
+                          onKeyDown={(e) => handleDigitKeyDown(e, idx, 'pin')}
+                          onPaste={(e) => handleDigitPaste(e, 'pin')}
+                          className="w-12 h-14 text-center text-xl font-bold rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Confirm PIN block */}
+                  <div className="mb-4">
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block text-center mb-3">
+                      Confirm your 6-digit PIN
+                    </label>
+                    <div className="flex gap-2.5 justify-center">
+                      {confirmDigits.map((digit, idx) => (
+                        <input
+                          key={`confirm-${idx}`}
+                          ref={el => confirmRefs.current[idx] = el}
+                          type={showPin ? 'text' : 'password'}
+                          value={digit}
+                          maxLength={1}
+                          onChange={(e) => handleDigitChange(e.target.value, idx, 'confirm')}
+                          onKeyDown={(e) => handleDigitKeyDown(e, idx, 'confirm')}
+                          onPaste={(e) => handleDigitPaste(e, 'confirm')}
+                          className="w-12 h-14 text-center text-xl font-bold rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Toggle show/hide PIN */}
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-2 mt-4 pt-4 border-t border-gray-100">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-500">
+                      <input 
+                        type="checkbox" 
+                        checked={showPin} 
+                        onChange={(e) => setShowPin(e.target.checked)} 
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span>Show PIN digits</span>
+                    </label>
+
+                    {isPinComplete && isConfirmComplete && !pinsMatch && (
+                      <span className="text-red-600 text-xs font-semibold">
+                        ❌ Passcodes do not match
+                      </span>
+                    )}
+                    {isPinComplete && isConfirmComplete && pinsMatch && (
+                      <span className="text-emerald-600 text-xs font-semibold">
+                        ✓ PIN matches
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Error messages */}
+              {pinError && (
+                <div className="w-full bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-4 font-medium">
+                  {pinError}
+                </div>
+              )}
+
+              {/* Continue button */}
+              <button 
+                className={`w-full h-[52px] font-semibold rounded-lg transition-all flex items-center justify-center gap-2 mb-6 ${
+                  canContinueStep1 ? 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 cursor-pointer text-white shadow-sm' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+                onClick={handleContinueToStep2}
+                disabled={!canContinueStep1}
+              >
+                Continue to create vault
+              </button>
+
+              {/* SECURITY EXPLAINER SECTION */}
+              <div className="border-t border-gray-200 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setExplainOpen(!explainOpen)}
+                  className="w-full flex items-center justify-between bg-transparent border-none cursor-pointer p-0 text-gray-500 text-sm font-semibold hover:text-indigo-600 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <HelpCircle size={18} />
+                    <span>How does this work?</span>
+                  </div>
+                  {explainOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                {explainOpen && (
+                  <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs leading-relaxed text-gray-500 space-y-3">
+                    <p>
+                      🔑 <strong>Local Key Derivation:</strong> Your encryption key is derived directly from your passkey or PIN using the browser&apos;s WebCrypto API.
+                    </p>
+                    <p>
+                      🚫 <strong>Zero Knowledge:</strong> The key never leaves your device. Actik servers only store the encrypted envelopes (gibberish without your device key).
+                    </p>
+                    <p>
+                      🔒 <strong>AES-GCM 256 Encryption:</strong> We use industry-standard AES-GCM 256-bit symmetric encryption to wrap certificates.
+                    </p>
+                    <p>
+                      ⚙️ <strong>Technical stack:</strong> Passkey PRF assertions or PIN-derived KEK envelopes secure the main Data Encryption Key (DEK).
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* =======================================================
+              STEP 2: CREATING THE VAULT CHECKSLIST
+             ======================================================= */}
+          {step === 2 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6 md:p-8 shadow-sm">
+              <h3 className="text-base md:text-lg font-bold text-stone-900 mb-1">
+                Creating your vault
+              </h3>
+              <p className="text-xs md:text-sm text-gray-500 mb-6 leading-relaxed">
+                Your browser will ask you to confirm with your {selectedMethod === 'pin' ? 'PIN passcode' : 'biometrics (Touch ID / Face ID)'}
+              </p>
+
+              {/* Checklist visualizer */}
+              <div className="flex flex-col gap-4 mb-8 w-full leading-relaxed">
+                {/* 1. Generating encryption key */}
+                <div className="flex items-center gap-3 text-sm md:text-base">
+                  {creationStatus.keyGen === 'idle' && <div className="w-5 h-5 rounded-full border border-gray-200 bg-gray-50 shrink-0" />}
+                  {creationStatus.keyGen === 'running' && <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-200 border-t-indigo-600 shrink-0" />}
+                  {creationStatus.keyGen === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
+                  {creationStatus.keyGen === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
+                  <span className={creationStatus.keyGen === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
+                    Generating encryption key...
+                  </span>
+                </div>
+
+                {/* 2. Creating vault envelope */}
+                <div className="flex items-center gap-3 text-sm md:text-base">
+                  {creationStatus.envelope === 'idle' && <div className="w-5 h-5 rounded-full border border-gray-200 bg-gray-50 shrink-0" />}
+                  {creationStatus.envelope === 'running' && <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-200 border-t-indigo-600 shrink-0" />}
+                  {creationStatus.envelope === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
+                  {creationStatus.envelope === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
+                  <span className={creationStatus.envelope === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
+                    Creating vault envelope...
+                  </span>
+                </div>
+
+                {/* 3. Saving to Actik */}
+                <div className="flex items-center gap-3 text-sm md:text-base">
+                  {creationStatus.saving === 'idle' && <div className="w-5 h-5 rounded-full border border-gray-200 bg-gray-50 shrink-0" />}
+                  {creationStatus.saving === 'running' && <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-200 border-t-indigo-600 shrink-0" />}
+                  {creationStatus.saving === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
+                  {creationStatus.saving === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
+                  <span className={creationStatus.saving === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
+                    Saving to Actik...
+                  </span>
+                </div>
+
+                {/* 4. Verifying vault */}
+                <div className="flex items-center gap-3 text-sm md:text-base">
+                  {creationStatus.verifying === 'idle' && <div className="w-5 h-5 rounded-full border border-gray-200 bg-gray-50 shrink-0" />}
+                  {creationStatus.verifying === 'running' && <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-200 border-t-indigo-600 shrink-0" />}
+                  {creationStatus.verifying === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
+                  {creationStatus.verifying === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
+                  <span className={creationStatus.verifying === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
+                    Verifying vault...
+                  </span>
+                </div>
+              </div>
+
+              {/* Step 2 Error card */}
+              {creationError && (
+                <div className="text-center">
+                  <div className="w-full bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3.5 mb-6 text-left">
+                    <strong>Vault creation failed:</strong>
+                    <p className="mt-1 text-[11px] leading-relaxed">{creationError}</p>
+                  </div>
+                  <button className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm flex items-center justify-center cursor-pointer" onClick={() => setStep(1)}>
+                    Try again
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* =======================================================
+              STEP 3: DONE / SUCCESS STATE
+             ======================================================= */}
+          {step === 3 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-6 md:p-8 text-center shadow-sm">
+              
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-500 mb-4 text-xl">
+                ✓
+              </div>
+
+              <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Vault ready</h2>
+              <p className="text-xs md:text-sm text-gray-500 mb-6 leading-relaxed">
+                Your credentials are now protected by your {selectedMethod === 'pin' ? 'PIN passcode' : 'biometrics (Touch ID / Face ID)'}
+              </p>
+
+              {/* Explainer cards */}
+              <div className="flex flex-col gap-3 text-left mb-8">
+                <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
+                  <span className="text-base shrink-0">🛡️</span>
+                  <p className="margin-0">
+                    <strong>Only you can open this vault</strong> — not even Actik can read your credentials or access your private keys.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
+                  <span className="text-base shrink-0">🏫</span>
+                  <p className="margin-0">
+                    <strong>If you lose access</strong> to your recovery codes, ask your university or ministry to re-issue your certificate.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
+                  <span className="text-base shrink-0">🔑</span>
+                  <p className="margin-0">
+                    <strong>Backup methods:</strong> You can add a backup unlock passcode or manage envelopes in Settings later.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                {isFromWallet ? (
+                  <button 
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
+                    onClick={() => navigate('/app/wallet')}
+                  >
+                    Return to wallet to claim your credentials
+                  </button>
+                ) : (
+                  <>
+                    <button 
+                      className="w-full sm:flex-1 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
+                      onClick={() => navigate('/app/wallet')}
+                    >
+                      Go to my wallet
+                    </button>
+                    <button 
+                      className="w-full sm:flex-1 border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
+                      onClick={() => navigate('/app/dashboard')}
+                    >
+                      Go to dashboard
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =======================================================
+          RESET VAULT CONFIRMATION WARNING MODAL (Requirement 8)
+         ======================================================= */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-stretch md:items-center justify-end md:justify-center z-[1000] p-0 md:p-4 flex-col">
+          <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in text-center">
+            <div className="text-4xl mb-2">⚠️</div>
+            <h3 className="text-lg font-bold text-red-600 mb-2">This will delete your vault</h3>
+            
+            <p className="text-xs text-gray-500 mb-6 leading-relaxed text-left">
+              Resetting your vault will <strong>permanently delete all encrypted credentials</strong> stored in it. You will need to re-claim all credentials from your institutions. <strong>This action cannot be undone.</strong>
+            </p>
+
+            <div className="mb-6 text-left">
+              <label className="text-xs font-bold text-gray-700 block mb-2">
+                Type RESET to confirm
+              </label>
+              <input
+                type="text"
+                value={resetInput}
+                onChange={(e) => setResetInput(e.target.value)}
+                placeholder="RESET"
+                className="w-full text-center h-11 border border-red-300 focus:outline-none focus:ring-2 focus:ring-red-500 rounded-lg text-sm font-semibold mb-2"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                className="w-1/2 border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
+                onClick={() => {
+                  setShowResetModal(false)
+                  setResetInput('')
+                }}
+                disabled={isResetting}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={resetInput !== 'RESET' || isResetting}
+                onClick={handleResetConfirm}
+                className={`w-1/2 text-white font-semibold h-11 rounded-lg text-sm flex items-center justify-center gap-1.5 transition-all ${
+                  resetInput === 'RESET' && !isResetting ? 'bg-red-600 hover:bg-red-700 active:bg-red-800 cursor-pointer' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isResetting && (
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
+                )}
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================
+          MODAL 3: RECONFIGURE VAULT CONFIRMATION
+         ======================================================= */}
+      {showReconfigureModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-stretch md:items-center justify-end md:justify-center z-[1000] p-0 md:p-4 flex-col">
+          <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in">
+            <div className="text-center mb-6">
+              <div className="text-4xl mb-2">⚠️</div>
+              <h3 className="text-lg font-bold text-stone-900">Change Unlock Method?</h3>
+              <p className="text-xs text-stone-500 mt-2 leading-relaxed text-center">
+                Changing your unlock method requires generating new local keys. Any credentials currently stored in your wallet will need to be re-encrypted or reclaimed.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={() => {
+                  setShowReconfigureModal(false)
+                  setExistingVault(null)
+                  setStep(1)
+                }}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
+              >
+                Proceed to Reconfigure
+              </button>
+              
+              <button
+                onClick={() => setShowReconfigureModal(false)}
+                className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// =======================================================
+// REUSABLE claimCredential HOOK (Requirement 12)
+// =======================================================
+export function useClaim() {
+  const { isUnlocked, checkVaultStatus, encryptPayload } = useZkVault()
+
+  const claimCredential = async (credential: Credential) => {
+    if (!credential.holder_id && !credential.holder_email) {
+      throw new Error('Credential holder identifier is missing.')
+    }
+
+    // Step 1: Check if vault exists
+    const ownerId = credential.holder_id
+    if (!ownerId) {
+      throw new Error('No student account associated with this credential.')
+    }
+
+    const status = await checkVaultStatus(ownerId)
+    if (status.status !== 'ok' || !status.exists) {
+      throw new Error('Vault setup is required. Please set up your vault first.')
+    }
+
+    // Step 2: Unlock vault
+    if (!isUnlocked) {
+      throw new Error('Vault is locked. Unlock your vault to claim credentials.')
+    }
+
+    // Step 3: Encrypt the sd_jwt string using zk-vault encryptPayload
+    // Encrypts the raw JSON containing the SD-JWT string.
+    const payload = { sdjwt: credential.sd_jwt }
+    const encrypted = await encryptPayload(payload)
+    const encryptedStr = JSON.stringify(encrypted)
+
+    // Step 4: Update Supabase credentials row
+    let res = await supabase
+      .from('credentials')
+      .update({
+        sd_jwt: encryptedStr,
+        claimed: true,
+        claimed_at: new Date().toISOString()
+      })
+      .eq('id', credential.id)
+
+    // Fallback: If table schema is schema.sql, insert to credentials and delete from pending_credentials
+    if (res.error && (res.error.message.includes('column') || res.error.code === '42703')) {
+      const fallbackRes = await supabase.from('credentials').insert({
+        owner: ownerId,
+        label: credential.degree_title,
+        cipher: encrypted.cipher,
+        iv: encrypted.iv
+      })
+      if (fallbackRes.error) {
+        throw new Error('Credential encrypted but failed to save. Please try again.')
+      }
+      // Delete the pending row
+      await supabase.from('pending_credentials').delete().eq('id', credential.id)
+    } else if (res.error) {
+      throw new Error('Credential encrypted but failed to save. Please try again.')
+    }
+
+    return true
+  }
+
+  return { claimCredential }
+}

@@ -1,87 +1,385 @@
-import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from './lib/supabaseClient'
-import Auth from './components/Auth'
-import IssuerPanel from './components/IssuerPanel'
-import HolderPanel from './components/HolderPanel'
-import VerifierPage from './components/VerifierPage'
+import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Session } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
+import Layout from './components/Layout'
+import GoogleAuth, { GoogleCallback } from './pages/auth/GoogleAuth'
+import RegisterIssuer from './pages/app/RegisterIssuer'
+import IssueCredential from './pages/app/IssueCredential'
+import Wallet from './pages/app/Wallet'
+import VaultSetup from './pages/app/VaultSetup'
+import ShareCredential from './pages/app/ShareCredential'
+import VerifyCredential from './pages/verify/VerifyCredential'
+import AdminDashboard from './pages/admin/AdminDashboard'
+import Notifications from './pages/app/Notifications'
+import InstitutionSettings from './pages/app/InstitutionSettings'
+import VerifyRegistry from './pages/public/VerifyRegistry'
 
-// zk-vault provider — wraps the holder experience. Copy the library into
-// src/vault/ first (see README).
+// Vault provider and storage adapter imports
 import { VaultProvider } from './vault/zk-vault'
 import { supabaseVaultAdapter } from './vault/vaultAdapter'
+import { initializeRateLimiting } from './lib/rateLimit'
 
-type Tab = 'holder' | 'issuer' | 'verify'
+// ==========================================
+// 6. Placeholder Page Components
+// ==========================================
+import IssuerDashboard from './pages/app/IssuerDashboard'
 
-export default function App() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [tab, setTab] = useState<Tab>('holder')
-
-  // A ?share=<id> link opens the public verifier with no login required.
-  const shareId = new URLSearchParams(location.search).get('share')
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
-    return () => sub.subscription.unsubscribe()
-  }, [])
-
-  if (shareId) {
-    return (
-      <div className="app">
-        <Header email={null} />
-        <h1>Verify a credential</h1>
-        <p className="muted" style={{ marginBottom: 16 }}>Shared with you via Actik.</p>
-        <VerifierPage shareId={shareId} />
-      </div>
-    )
-  }
-
-  if (!session) {
-    return (
-      <div className="app">
-        <Header email={null} />
-        <Auth />
-      </div>
-    )
-  }
-
-  const user = session.user
+// ==========================================
+// 1. Loading Screen Component
+// ==========================================
+export function LoadingScreen() {
+  const spinnerStyle = `
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `
   return (
-    <VaultProvider storageAdapter={supabaseVaultAdapter}>
-      <div className="app">
-        <Header email={user.email ?? null} />
-        <div className="tabs">
-          <button className={tab === 'holder' ? 'active' : ''} onClick={() => setTab('holder')}>My wallet</button>
-          <button className={tab === 'issuer' ? 'active' : ''} onClick={() => setTab('issuer')}>Issue</button>
-          <button className={tab === 'verify' ? 'active' : ''} onClick={() => setTab('verify')}>Verify</button>
-        </div>
-        {tab === 'holder' && <HolderPanel user={user} />}
-        {tab === 'issuer' && <IssuerPanel user={user} />}
-        {tab === 'verify' && (
-          <div className="card">
-            <p className="muted">Open a share link (…/?share=ID) to verify a credential. Verification needs no account.</p>
-          </div>
-        )}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: 'var(--paper)', fontFamily: 'inherit' }}>
+      <style>{spinnerStyle}</style>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+        <div style={{
+          width: 44,
+          height: 44,
+          border: '4px solid var(--forest-soft)',
+          borderTop: '4px solid var(--forest)',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite'
+        }}></div>
+        <p style={{ color: 'var(--forest)', fontWeight: 500, fontSize: '1.1rem', margin: 0 }}>Loading Actik...</p>
       </div>
-    </VaultProvider>
+    </div>
   )
 }
 
-function Header({ email }: { email: string | null }) {
+// ==========================================
+// 2. Private Route Component
+// ==========================================
+interface RouteProps {
+  children: React.ReactNode
+}
+
+export function PrivateRoute({ children }: RouteProps) {
+  const [session, setSession] = useState<Session | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+
+    async function fetchRole(userId: string) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .single()
+
+        if (active) {
+          if (!error && data) {
+            setRole(data.role)
+          } else {
+            setRole(null)
+          }
+          setLoading(false)
+        }
+      } catch (err) {
+        if (active) {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    }
+
+    // Fetch initial session
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) {
+        setSession(data.session)
+        if (data.session?.user) {
+          fetchRole(data.session.user.id)
+        } else {
+          setLoading(false)
+        }
+      }
+    })
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (active) {
+        setSession(currentSession)
+        if (currentSession?.user) {
+          // Do NOT set loading=true here — that unmounts VaultProvider and all
+          // descendant state (decryptedSDJwt, form inputs, etc.) on every token
+          // refresh (which fires when the user switches back to this tab).
+          // Silently refresh role without showing the loading screen.
+          fetchRole(currentSession.user.id)
+        } else {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  if (loading) {
+    return <LoadingScreen />
+  }
+
+  if (!session) {
+    return <Navigate to="/auth/login" replace />
+  }
+
+  if (role === 'admin') {
+    return <Navigate to="/admin" replace />
+  }
+
+  return <>{children}</>
+}
+
+// ==========================================
+// 3. Admin Route Component
+// ==========================================
+export function AdminRoute({ children }: RouteProps) {
+  const [session, setSession] = useState<Session | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+
+    async function fetchRole(userId: string) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .single()
+
+        console.log('[AdminRoute] fetchRole for:', userId, 'data:', data, 'error:', error)
+        if (active) {
+          if (!error && data) {
+            setRole(data.role)
+          } else {
+            setRole(null)
+          }
+          setLoading(false)
+        }
+      } catch (err) {
+        if (active) {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    }
+
+    // Fetch initial session & role
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) {
+        setSession(data.session)
+        if (data.session?.user) {
+          fetchRole(data.session.user.id)
+        } else {
+          setLoading(false)
+        }
+      }
+    })
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (active) {
+        setSession(currentSession)
+        if (currentSession?.user) {
+          fetchRole(currentSession.user.id)
+        } else {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  if (loading) {
+    return <LoadingScreen />
+  }
+
+  if (!session) {
+    return <Navigate to="/auth/login" replace />
+  }
+
+  if (role !== 'admin') {
+    return <Navigate to="/app/dashboard" replace />
+  }
+
+  return <>{children}</>
+}
+
+// ==========================================
+// 4. Root Redirect Component
+// ==========================================
+export function RootRedirect() {
+  const [session, setSession] = useState<Session | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+
+    async function fetchRole(userId: string) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .single()
+
+        console.log('[RootRedirect] fetchRole for:', userId, 'data:', data, 'error:', error)
+        if (active) {
+          if (!error && data) {
+            setRole(data.role)
+          } else {
+            setRole(null)
+          }
+          setLoading(false)
+        }
+      } catch (err) {
+        if (active) {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    }
+
+    // Fetch initial session & role
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) {
+        setSession(data.session)
+        if (data.session?.user) {
+          fetchRole(data.session.user.id)
+        } else {
+          setLoading(false)
+        }
+      }
+    })
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (active) {
+        setSession(currentSession)
+        if (currentSession?.user) {
+          fetchRole(currentSession.user.id)
+        } else {
+          setRole(null)
+          setLoading(false)
+        }
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  if (loading) {
+    return <LoadingScreen />
+  }
+
+  if (!session) {
+    return <Navigate to="/auth/login" replace />
+  }
+
+  // Redirect based on user role
+  if (role === 'admin') {
+    return <Navigate to="/admin" replace />
+  }
+  if (role === 'issuer') {
+    return <Navigate to="/app/dashboard" replace />
+  }
+  if (role === 'student') {
+    return <Navigate to="/app/wallet" replace />
+  }
+
+  // Default redirect if role is unknown or not set
+  return <Navigate to="/app/dashboard" replace />
+}
+
+// ==========================================
+// 5. Main App Component
+// ==========================================
+export default function App() {
+  useEffect(() => {
+    initializeRateLimiting()
+  }, [])
+
   return (
-    <header className="top">
-      <div className="brand">
-        <span className="dot" />
-        <h1 style={{ fontSize: '1.4rem' }}>Actik</h1>
-        <small>digital certificates</small>
-      </div>
-      {email && (
-        <div className="row">
-          <span className="muted">{email}</span>
-          <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
-        </div>
-      )}
-    </header>
+    <BrowserRouter>
+      <Routes>
+        {/* Root redirect route */}
+        <Route path="/" element={<RootRedirect />} />
+
+        {/* Public auth routes */}
+        <Route path="/auth/login" element={<GoogleAuth />} />
+        <Route path="/auth/callback" element={<GoogleCallback />} />
+
+        {/* Authenticated app routes */}
+        <Route
+          path="/app"
+          element={
+            <PrivateRoute>
+              <VaultProvider
+                storageAdapter={supabaseVaultAdapter}
+                lockOnWindowBlur={false}
+                autoLockTimeoutMs={1800000}
+              >
+                <Layout />
+              </VaultProvider>
+            </PrivateRoute>
+          }
+        >
+          <Route path="dashboard" element={<IssuerDashboard />} />
+          <Route path="register-issuer" element={<RegisterIssuer />} />
+          <Route path="issue" element={<IssueCredential />} />
+          <Route path="wallet" element={<Wallet />} />
+          <Route path="vault-setup" element={<VaultSetup />} />
+          <Route path="share/:credentialId" element={<ShareCredential />} />
+          <Route path="notifications" element={<Notifications />} />
+          <Route path="institution-settings" element={<InstitutionSettings />} />
+          <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
+        </Route>
+
+        {/* Admin routes */}
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <Layout />
+            </AdminRoute>
+          }
+        >
+          <Route index element={<AdminDashboard />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Route>
+
+        {/* Public verification route */}
+        <Route path="/verify/:token" element={<VerifyCredential />} />
+        
+        {/* Public registry verification portal */}
+        <Route path="/public" element={<VerifyRegistry />} />
+
+        {/* Global fallback route */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   )
 }

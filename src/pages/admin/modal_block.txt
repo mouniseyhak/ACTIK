@@ -1,0 +1,194 @@
+      {/* 5. INSTITUTION DETAIL MODAL */}
+      {selectedIssuer && (
+        <div className="fixed inset-0 bg-stone-900/60 z-40 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white border border-stone-200 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden animate-scale-in max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="p-6 border-b border-stone-150 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-widest block">
+                  Institution Detail View
+                </span>
+                <h3 className="text-lg font-bold text-stone-900 mt-1">{selectedIssuer.name}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedIssuer(null)}
+                className="text-stone-400 hover:text-stone-600 font-bold text-base focus:outline-none p-1.5 rounded-full hover:bg-stone-50 transition-all cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
+                    Domain
+                  </span>
+                  <a
+                    href={`https://${selectedIssuer.domain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-indigo-650 hover:underline font-bold inline-flex items-center gap-1 mt-1"
+                  >
+                    {selectedIssuer.domain}
+                    <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
+                    Institution Type
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border inline-block mt-1 ${getTypeBadgeStyles(selectedIssuer.type)}`}>
+                    {selectedIssuer.type}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
+                  Decentralized Identifier (DID)
+                </span>
+                <div className="relative group">
+                  <code className="text-[10px] bg-stone-50 border border-stone-250 p-2 rounded block font-mono text-stone-600 break-all select-all font-medium leading-normal pr-10">
+                    {selectedIssuer.did}
+                  </code>
+                  <button
+                    onClick={(e) => handleCopyDid(e, selectedIssuer.did)}
+                    className="absolute right-2 top-2 text-stone-400 hover:text-indigo-600 p-1 rounded bg-white border border-stone-200 shadow-sm transition-colors focus:outline-none cursor-pointer"
+                    title="Copy DID"
+                  >
+                    {copiedDid === selectedIssuer.did ? (
+                      <span className="text-emerald-500 font-bold text-[10px]">✓</span>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
+                  Cryptographic Public Key (JWK)
+                </span>
+                <div className="relative group">
+                  <div className="bg-stone-50 border border-stone-250 p-2.5 rounded-lg max-h-32 overflow-auto">
+                    <code className="text-[9px] font-mono text-stone-500 break-all select-all block leading-normal">
+                      {selectedIssuer.public_key}
+                    </code>
+                  </div>
+                  <button
+                    onClick={(e) => handleCopyDid(e, selectedIssuer.public_key)}
+                    className="absolute right-3.5 top-3 text-stone-400 hover:text-indigo-600 p-1 rounded bg-white border border-stone-200 shadow-sm transition-colors focus:outline-none cursor-pointer"
+                    title="Copy Public Key"
+                  >
+                    {copiedDid === selectedIssuer.public_key ? (
+                      <span className="text-emerald-500 font-bold text-[10px]">✓</span>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 border-t border-stone-100 pt-4">
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
+                    Accreditation Status
+                  </span>
+                  {renderStatusBadge(selectedIssuer)}
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
+                    Credentials Issued
+                  </span>
+                  <div className="mt-1 text-sm font-bold text-stone-850 flex items-center gap-2">
+                    {loadingDetailCount ? (
+                      <div className="w-4.5 h-4.5 border-2 border-stone-200 border-t-indigo-600 rounded-full animate-spin" />
+                    ) : (
+                      <span>{detailCredCount ?? 0} credentials</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {selectedIssuer.accredited_at && selectedIssuer.accredited && (
+                <div className="text-[10px] text-stone-400 font-semibold border-t border-stone-50 pt-2">
+                  Accredited on: {new Date(selectedIssuer.accredited_at).toLocaleString()}
+                </div>
+              )}
+              {selectedIssuer.revoked_at && !selectedIssuer.accredited && (
+                <div className="text-[10px] text-rose-500 font-semibold border-t border-stone-50 pt-2">
+                  Accreditation Revoked on: {new Date(selectedIssuer.revoked_at).toLocaleString()}
+                </div>
+              )}
+            </div>
+
+            {/* Actions Footer */}
+            <div className="p-6 border-t border-stone-150 bg-stone-50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedIssuer(null)}
+                className="h-10 px-4 border border-stone-250 bg-white text-stone-600 hover:bg-stone-50 font-semibold rounded-lg text-xs transition-colors cursor-pointer"
+              >
+                Close Details
+              </button>
+              
+              {selectedIssuer.accredited ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOpenRevokeModal(selectedIssuer);
+                    setSelectedIssuer(null);
+                  }}
+                  className="h-10 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold rounded-lg text-xs shadow-sm transition-colors cursor-pointer"
+                >
+                  Revoke Accreditation
+                </button>
+              ) : selectedIssuer.revoked_at !== null ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOpenRestoreModal(selectedIssuer);
+                    setSelectedIssuer(null);
+                  }}
+                  className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-lg text-xs shadow-sm transition-colors cursor-pointer"
+                >
+                  Restore Accreditation
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleOpenRejectModal(selectedIssuer);
+                      setSelectedIssuer(null);
+                    }}
+                    className="h-10 px-4 border border-rose-200 hover:bg-rose-50 text-rose-600 font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                  >
+                    Reject Application
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleOpenApproveModal(selectedIssuer);
+                      setSelectedIssuer(null);
+                    }}
+                    className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-lg text-xs shadow-sm transition-colors cursor-pointer"
+                  >
+                    Approve Accreditation
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}

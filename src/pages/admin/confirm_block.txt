@@ -1,0 +1,103 @@
+  // --- Confirm Action Executions ---
+  const handleConfirmAction = async () => {
+    if (!confirmModal || !currentUser) return
+
+    const { type, issuer } = confirmModal
+    setConfirmModal((prev) => (prev ? { ...prev, loading: true, error: null } : null))
+
+    try {
+      const timestamp = new Date().toISOString()
+      
+      if (type === 'approve' || type === 'restore') {
+        let res = await supabase
+          .from('issuers')
+          .update({
+            accredited: true,
+            accredited_at: timestamp,
+            accredited_by: currentUser.id,
+            revoked_at: null,
+            revoked_by: null,
+          })
+          .eq('id', issuer.id)
+
+        // Database columns metadata schema fallback
+        if (res.error && (res.error.message.includes('column') || res.error.code === '42703')) {
+          res = await supabase.from('issuers').update({ accredited: true }).eq('id', issuer.id)
+        }
+
+        if (res.error) throw res.error
+
+        setIssuers((prev) =>
+          prev.map((i) =>
+            i.id === issuer.id
+              ? {
+                  ...i,
+                  accredited: true,
+                  accredited_at: timestamp,
+                  accredited_by: currentUser.id,
+                  revoked_at: null,
+                  revoked_by: null,
+                }
+              : i
+          )
+        )
+
+        showToast(`${issuer.name} is now accredited successfully.`, 'success')
+      } else if (type === 'revoke') {
+        let res = await supabase
+          .from('issuers')
+          .update({
+            accredited: false,
+            revoked_at: timestamp,
+            revoked_by: currentUser.id,
+          })
+          .eq('id', issuer.id)
+
+        if (res.error && (res.error.message.includes('column') || res.error.code === '42703')) {
+          res = await supabase.from('issuers').update({ accredited: false }).eq('id', issuer.id)
+        }
+
+        if (res.error) throw res.error
+
+        setIssuers((prev) =>
+          prev.map((i) =>
+            i.id === issuer.id
+              ? {
+                  ...i,
+                  accredited: false,
+                  revoked_at: timestamp,
+                  revoked_by: currentUser.id,
+                }
+              : i
+          )
+        )
+
+        showToast(`${issuer.name} accreditation revoked. All issued credentials fail trust validation.`, 'warning')
+      } else if (type === 'reject') {
+        // Delete pending application row completely from issuers table
+        const res = await supabase
+          .from('issuers')
+          .delete()
+          .eq('id', issuer.id)
+
+        if (res.error) throw res.error
+
+        setIssuers((prev) => prev.filter((i) => i.id !== issuer.id))
+        showToast(`Registration application for ${issuer.name} rejected and deleted.`, 'warning')
+      }
+
+      setConfirmModal(null)
+    } catch (err: any) {
+      console.error('Confirmation action error:', err)
+      setConfirmModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              loading: false,
+              error: `Action failed: ${err.message || 'Please try again.'}`,
+            }
+          : null
+      )
+    }
+  }
+
