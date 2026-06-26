@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useLanguage } from '../lib/i18n'
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
@@ -12,7 +12,6 @@ export default function Layout() {
   const [prevCount, setPrevCount] = useState<number>(0)
   const [shouldPulse, setShouldPulse] = useState<boolean>(false)
   const navigate = useNavigate()
-  const location = useLocation()
   const { t } = useLanguage()
 
   useEffect(() => {

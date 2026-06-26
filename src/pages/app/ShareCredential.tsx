@@ -6,7 +6,7 @@ import { useZkVault } from '../../vault/zk-vault'
 import { readDisclosures, present } from '../../lib/sdjwt'
 import { useLanguage } from '../../lib/i18n'
 import { checkRateLimit } from '../../lib/rateLimit'
-import { Lock, CheckCircle, Copy, ExternalLink, Mail, Download, ChevronDown, ChevronUp, Calendar, AlertTriangle, Clock, Trash2 } from 'lucide-react'
+import { Lock, CheckCircle, Copy, ExternalLink, Mail, Download, Calendar, AlertTriangle, Clock } from 'lucide-react'
 
 // Note: The prompt expects: import { useVault } from '../../vault/zk-vault/useVault'
 // But the actual file in this project exports useZkVault from '../../vault/zk-vault'
@@ -65,7 +65,6 @@ export default function ShareCredential() {
   const [credential, setCredential] = useState<Credential | null>(null)
   const [decryptedSDJwt, setDecryptedSDJwt] = useState<string | null>(null)
   const [availableClaims, setAvailableClaims] = useState<Record<string, any>>({})
-  const [pastShares, setPastShares] = useState<ShareRecord[]>([])
 
 
   // Unlock Modal states

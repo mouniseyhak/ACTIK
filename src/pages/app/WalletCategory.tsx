@@ -32,19 +32,6 @@ const spinStyles = `
   }
 `
 
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return '—'
-  try {
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return dateStr
-    const day = d.getDate()
-    const month = d.toLocaleDateString('en-US', { month: 'long' })
-    const year = d.getFullYear()
-    return `${day} ${month} ${year}`
-  } catch {
-    return dateStr
-  }
-}
 
 export default function WalletCategory() {
   const navigate = useNavigate()
@@ -56,10 +43,9 @@ export default function WalletCategory() {
   const [loadError, setLoadError] = useState(false)
 
   // Modals & Action States
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
   
   // Vault state
-  const { isUnlocked, unlockWithPin, unlockWithPasskey, checkVaultStatus, decryptPayload } = useZkVault()
+  const { isUnlocked, unlockWithPin, unlockWithPasskey, checkVaultStatus } = useZkVault()
   const { t } = useLanguage()
   const [vaultExists, setVaultExists] = useState<boolean | null>(null)
   const [unlockMethod, setUnlockMethod] = useState<'pin' | 'passkey' | 'biometric' | 'both' | null>(null)
@@ -71,10 +57,6 @@ export default function WalletCategory() {
 
   const [pendingNavCredId, setPendingNavCredId] = useState<string | null>(null)
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 3000)
-  }
 
   // Type label formatting
   const typeLabels: Record<string, string> = {
@@ -434,11 +416,6 @@ export default function WalletCategory() {
         </div>
       )}
 
-      {toastMessage && (
-        <div className="fixed bottom-24 right-4 md:right-6 bg-stone-900 text-white px-4 py-2.5 rounded-lg shadow-lg z-[1000] text-sm font-semibold">
-          {toastMessage}
-        </div>
-      )}
     </div>
   )
 }

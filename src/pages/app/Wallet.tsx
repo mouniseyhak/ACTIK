@@ -1,25 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { readDisclosures } from '../../lib/sdjwt'
+
 
 import { useZkVault } from '../../vault/zk-vault'
 import { useLanguage } from '../../lib/i18n'
 
-// Date formatting helper
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return '—'
-  try {
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return dateStr
-    const day = d.getDate()
-    const month = d.toLocaleDateString('en-US', { month: 'long' })
-    const year = d.getFullYear()
-    return `${day} ${month} ${year}`
-  } catch {
-    return dateStr
-  }
-}
 
 
 // Shared keyframe spinner animation
@@ -59,8 +45,7 @@ export default function Wallet() {
     isUnlocked, 
     checkVaultStatus, 
     unlockWithPin, 
-    unlockWithPasskey, 
-    decryptPayload 
+    unlockWithPasskey 
   } = useZkVault()
   const { t } = useLanguage()
 
@@ -75,7 +60,6 @@ export default function Wallet() {
   const [loadError, setLoadError] = useState<boolean>(false)
 
   // Modals & Action States
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [showUnlockModal, setShowUnlockModal] = useState(false)
   const [pinInput, setPinInput] = useState('')
   const [unlockError, setUnlockError] = useState<string | null>(null)
@@ -85,11 +69,7 @@ export default function Wallet() {
   // Navigation unlock state
   const [pendingNavCredId, setPendingNavCredId] = useState<string | null>(null)
 
-  // Helper: Display toast notification
-  const showToast = (msg: string) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 3000)
-  }
+
 
   // Check vault configuration on mount & session changes
   const checkVault = useCallback(async (userId: string) => {
@@ -702,12 +682,6 @@ export default function Wallet() {
         </div>
       )}
 
-      {/* Toast notifications */}
-      {toastMessage && (
-        <div className="fixed bottom-24 right-4 md:right-6 bg-stone-900 text-white px-4 py-2.5 rounded-lg shadow-lg z-[1000] text-sm font-semibold animate-scale-in">
-          {toastMessage}
-        </div>
-      )}
     </div>
   )
 }

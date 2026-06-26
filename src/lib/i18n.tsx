@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 export type Language = 'en' | 'km';
 
@@ -49,7 +49,6 @@ const translations = {
       unlock_with_passkey: '🔑 Unlock with Passkey',
       setup_required_title: 'Encryption Vault Required',
       setup_required_desc: 'To claim credentials, you must first create an encrypted browser vault. This derives keys locally to secure your data so that Supabase only stores ciphertext.',
-      setup_vault_btn: 'Set up vault',
       setup_vault_btn: 'Set up vault',
       back_to_wallet: 'Back to Wallet',
       no_credentials_found: 'No credentials found',
@@ -134,7 +133,6 @@ const translations = {
       enter_vault_pin: 'Enter Vault PIN',
       complete_biometric: 'Complete the biometric prompt on your device',
       device_ask_biometric: 'Your device will ask for biometric confirmation.',
-      try_again: 'Try again',
       share_revoked_success: 'Share link revoked successfully',
       share_revoke_failed: 'Failed to revoke share link',
       cannot_extend_inactive: 'Cannot extend: Share link is no longer active',
@@ -191,7 +189,6 @@ const translations = {
       retry_btn: 'Retry',
       all_caught_up: 'All caught up!',
       no_pending_credentials_desc: 'You have no pending credentials to claim at this time. Institutions will issue digital certificates directly to your identity.',
-      issued_by: 'Issued by: ',
       claim_to_vault_btn: 'Claim to Vault',
       claim_failed_msg: 'Claim failed: ',
       unlock_and_claim_btn: 'Unlock & Claim',
@@ -296,7 +293,6 @@ const translations = {
       other_credentials: 'OTHER CREDENTIALS',
       see_all: 'See all',
       status_claimed: '✓ Claimed',
-      status_pending: '⏳ Pending',
       status_pending: '⏳ Pending',
       back_to_issued: 'Back to Issued',
       no_creds_in_category: 'No credentials found in this category.',
@@ -515,7 +511,6 @@ const translations = {
       setup_required_title: 'ទាមទារកាបូបសុវត្ថិភាព',
       setup_required_desc: 'ដើម្បីទទួលយកវិញ្ញាបនបត្រ អ្នកត្រូវបង្កើតកាបូបសុវត្ថិភាពលើកម្មវិធីរុករករបស់អ្នកជាមុនសិន។ វាបង្កើតសោក្នុងឧបករណ៍នេះដើម្បីការពារទិន្នន័យរបស់អ្នក ដូច្នេះ Supabase រក្សាទុកតែអត្ថបទអ៊ិនគ្រីបប៉ុណ្ណោះ។',
       setup_vault_btn: 'រៀបចំកាបូបសុវត្ថិភាព',
-      setup_vault_btn: 'រៀបចំកាបូបសុវត្ថិភាព',
       back_to_wallet: 'ត្រឡប់ទៅកាបូបវិញ',
       no_credentials_found: 'រកមិនឃើញវិញ្ញាបនបត្រទេ',
       unlocking: 'កំពុងបើកសោ...',
@@ -599,7 +594,6 @@ const translations = {
       enter_vault_pin: 'បញ្ចូលលេខកូដកាបូប',
       complete_biometric: 'សូមបញ្ចប់ការបញ្ជាក់អត្តសញ្ញាណជីវមាត្រលើឧបករណ៍របស់អ្នក',
       device_ask_biometric: 'ឧបករណ៍របស់អ្នកនឹងស្នើសុំការបញ្ជាក់អត្តសញ្ញាណជីវមាត្រ។',
-      try_again: 'ព្យាយាមម្តងទៀត',
       share_revoked_success: 'តំណចែករំលែកត្រូវបានដកហូតដោយជោគជ័យ',
       share_revoke_failed: 'បរាជ័យក្នុងការដកហូតតំណចែករំលែក',
       cannot_extend_inactive: 'មិនអាចបន្តបានទេ៖ តំណចែករំលែកនេះមិនសកម្មទៀតទេ',
@@ -656,7 +650,6 @@ const translations = {
       retry_btn: 'ព្យាយាមម្តងទៀត',
       all_caught_up: 'បានទទួលទាំងអស់ហើយ!',
       no_pending_credentials_desc: 'អ្នកមិនមានវិញ្ញាបនបត្រដែលត្រូវទទួលនៅពេលនេះទេ។ ស្ថាប័ននឹងចេញវិញ្ញាបនបត្រឌីជីថលដោយផ្ទាល់ទៅកាន់អត្តសញ្ញាណរបស់អ្នក។',
-      issued_by: 'ចេញដោយ៖ ',
       claim_to_vault_btn: 'ទទួលចូលកាបូប',
       claim_failed_msg: 'ការទទួលបរាជ័យ៖ ',
       unlock_and_claim_btn: 'បើកសោ និងទទួល',
@@ -761,7 +754,6 @@ const translations = {
       other_credentials: 'វិញ្ញាបនបត្រផ្សេងៗ',
       see_all: 'មើលទាំងអស់',
       status_claimed: '✓ បានទទួល',
-      status_pending: '⏳ រង់ចាំ',
       status_pending: '⏳ រង់ចាំ',
       back_to_issued: 'ត្រឡប់ទៅវិញ្ញាបនបត្រដែលបានចេញ',
       no_creds_in_category: 'រកមិនឃើញវិញ្ញាបនបត្រក្នុងប្រភេទនេះទេ។',

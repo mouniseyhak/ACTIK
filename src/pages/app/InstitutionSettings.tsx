@@ -10,13 +10,7 @@ import {
   Copy, 
   Check, 
   Calendar, 
-  ArrowRight,
-  Plus,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Save,
-  Link2
+  ArrowRight
 } from 'lucide-react'
 import { useLanguage } from '../../lib/i18n'
 import LanguageSwitcher from '../../components/LanguageSwitcher'
@@ -37,7 +31,7 @@ interface IssuerInfo {
 
 export default function InstitutionSettings() {
   const navigate = useNavigate()
-  const { t, language, setLanguage } = useLanguage()
+  const { t } = useLanguage()
   const [currentUser, setCurrentUser] = useState<any | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)

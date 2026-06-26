@@ -21,6 +21,11 @@ interface PendingCredential {
   iv?: string
   credential_type?: string
   type_metadata?: any
+  label?: string
+  student_id?: string
+  major?: string
+  graduation_date?: string
+  certificate_id?: string
 }
 
 export default function Notifications() {

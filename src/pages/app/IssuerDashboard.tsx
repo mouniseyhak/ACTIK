@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { generateIssuerKeys, didWeb } from '../../lib/did'
-import { issueSdJwt, readDisclosures } from '../../lib/sdjwt'
-import { compressFile, getFileSizeKB } from '../../lib/fileCompression'
+
 import { useLanguage } from '../../lib/i18n'
 
 // Shared keyframe spinner animation
@@ -47,8 +46,6 @@ export default function IssuerDashboard() {
   const [isUpdatingKeys, setIsUpdatingKeys] = useState(false)
   const [updateKeysError, setUpdateKeysError] = useState<string | null>(null)
 
-  // Credential Issuance Form Fields
-  const [studentPhoto, setStudentPhoto] = useState<string | null>(null)
 
   // Check registration and keys on mount/update
   useEffect(() => {
@@ -126,34 +123,6 @@ export default function IssuerDashboard() {
     return () => { active = false }
   }, [navigate])
 
-  // Look up student profile on email blur
-  const handleEmailBlur = async () => {
-    const emailVal = studentEmail.trim().toLowerCase()
-    if (!emailVal || !emailVal.includes('@')) return
-
-    setCheckingStudent(true)
-    setStudentFoundStatus(null)
-    setStudentUserId(null)
-
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('email', emailVal)
-        .maybeSingle()
-
-      if (!error && data) {
-        setStudentUserId(data.id)
-        setStudentFoundStatus('found')
-      } else {
-        setStudentFoundStatus('not_found')
-      }
-    } catch {
-      setStudentFoundStatus('not_found')
-    } finally {
-      setCheckingStudent(false)
-    }
-  }
 
   // Registration Domain validation helper
   const handleDomainBlur = () => {
