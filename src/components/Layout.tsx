@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { useLanguage } from '../lib/i18n'
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
@@ -11,6 +12,8 @@ export default function Layout() {
   const [prevCount, setPrevCount] = useState<number>(0)
   const [shouldPulse, setShouldPulse] = useState<boolean>(false)
   const navigate = useNavigate()
+  const location = useLocation()
+  const { t } = useLanguage()
 
   useEffect(() => {
     let active = true
@@ -56,7 +59,7 @@ export default function Layout() {
       if (active) {
         setSession(currentSession)
         if (currentSession?.user) {
-          setLoading(true)
+          // Do not set loading=true here to prevent remounting Outlet
           fetchRole(currentSession.user.id)
         } else {
           setRole(null)
@@ -156,7 +159,7 @@ export default function Layout() {
             borderRadius: '50%',
             animation: 'spin 1s linear infinite'
           }}></div>
-          <p style={{ color: 'var(--forest)', fontWeight: 500, fontSize: '1.1rem', margin: 0 }}>Loading Actik...</p>
+          <p style={{ color: 'var(--forest)', fontWeight: 500, fontSize: '1.1rem', margin: 0 }}>{t('layout.loading')}</p>
         </div>
       </div>
     )
@@ -176,14 +179,14 @@ export default function Layout() {
     if (role === 'issuer') {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
-          Issuer
+          {t('role.issuer')}
         </span>
       )
     }
     if (role === 'student') {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-100 text-teal-800">
-          Student
+          {t('role.student')}
         </span>
       )
     }
@@ -215,9 +218,9 @@ export default function Layout() {
             <div className="flex">
               {/* Brand Logo & Tagline */}
               <div className="flex flex-col justify-center mr-8">
-                <span className="text-lg md:text-2xl font-bold text-indigo-600 leading-tight">Actik</span>
+                <img src="/logo.png" alt="Actik" className="h-10 md:h-12 w-auto mb-0.5" />
                 <span className="text-[10px] text-gray-500 font-medium tracking-wide uppercase hidden md:inline">
-                  Digital certificates for Cambodia
+                  {t('layout.tagline')}
                 </span>
               </div>
 
@@ -225,13 +228,18 @@ export default function Layout() {
               <div className="hidden md:flex md:space-x-8">
                 {role === 'issuer' && (
                   <NavLink to="/app/dashboard" className={linkClass}>
-                    Institution Dashboard
+                    {t('layout.institution_dashboard')}
                   </NavLink>
                 )}
                 {role === 'student' && (
-                  <NavLink to="/app/wallet" end className={linkClass}>
-                    My wallet
-                  </NavLink>
+                  <>
+                    <NavLink to="/app/wallet" end className={linkClass}>
+                      {t('nav.wallet')}
+                    </NavLink>
+                    <NavLink to="/app/activity" className={linkClass}>
+                      {t('nav.activity')}
+                    </NavLink>
+                  </>
                 )}
                 {role === 'admin' && (
                   <NavLink to="/admin" end className={linkClass}>
@@ -279,7 +287,7 @@ export default function Layout() {
                 className="inline-flex items-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors p-2 md:p-0"
                 aria-label="Sign out"
               >
-                <span className="hidden md:inline">Sign out</span>
+                <span className="hidden md:inline">{t('layout.sign_out')}</span>
                 <span className="inline md:hidden">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013-3v1" />
@@ -304,13 +312,19 @@ export default function Layout() {
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
-              <span className="mt-1">My wallet</span>
+              <span className="mt-1">{t('nav.wallet')}</span>
+            </NavLink>
+            <NavLink to="/app/activity" className={bottomNavLinkClass}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+              <span className="mt-1">{t('nav.activity')}</span>
             </NavLink>
             <NavLink to="/app/vault-setup" className={bottomNavLinkClass}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="mt-1">Account</span>
+              <span className="mt-1">{t('nav.account')}</span>
             </NavLink>
           </>
         )}
@@ -320,14 +334,20 @@ export default function Layout() {
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011-1v5m-4 0h4" />
               </svg>
-              <span className="mt-1">Dashboard</span>
+              <span className="mt-1">{t('nav.dashboard')}</span>
+            </NavLink>
+            <NavLink to="/app/issued" className={bottomNavLinkClass}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="mt-1">{t('nav.issued')}</span>
             </NavLink>
             <NavLink to="/app/institution-settings" className={bottomNavLinkClass}>
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              <span className="mt-1">Settings</span>
+              <span className="mt-1">{t('nav.settings')}</span>
             </NavLink>
           </>
         )}

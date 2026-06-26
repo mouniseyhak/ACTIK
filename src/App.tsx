@@ -14,8 +14,11 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import Notifications from './pages/app/Notifications'
 import InstitutionSettings from './pages/app/InstitutionSettings'
 import VerifyRegistry from './pages/public/VerifyRegistry'
-
-// Vault provider and storage adapter imports
+import Activity from './pages/app/Activity'
+import WalletCategory from './pages/app/WalletCategory'
+import CredentialDetail from './pages/app/CredentialDetail'
+import IssuedCredentials from './pages/app/IssuedCredentials'
+import IssuedCredentialsCategory from './pages/app/IssuedCredentialsCategory'
 import { VaultProvider } from './vault/zk-vault'
 import { supabaseVaultAdapter } from './vault/vaultAdapter'
 import { initializeRateLimiting } from './lib/rateLimit'
@@ -350,10 +353,16 @@ export default function App() {
           <Route path="dashboard" element={<IssuerDashboard />} />
           <Route path="register-issuer" element={<RegisterIssuer />} />
           <Route path="issue" element={<IssueCredential />} />
+          <Route path="issued" element={<IssuedCredentials />} />
+          <Route path="issued/type/:credentialType" element={<IssuedCredentialsCategory />} />
+          {/* Student routes */}
           <Route path="wallet" element={<Wallet />} />
+          <Route path="wallet/type/:credentialType" element={<WalletCategory />} />
+          <Route path="credential/:id" element={<CredentialDetail />} />
           <Route path="vault-setup" element={<VaultSetup />} />
           <Route path="share/:credentialId" element={<ShareCredential />} />
           <Route path="notifications" element={<Notifications />} />
+          <Route path="activity" element={<Activity />} />
           <Route path="institution-settings" element={<InstitutionSettings />} />
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
         </Route>
@@ -383,3 +392,4 @@ export default function App() {
     </BrowserRouter>
   )
 }
+

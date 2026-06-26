@@ -78,9 +78,9 @@ export default function GoogleAuth() {
       
       <div className="w-full max-w-md p-6 md:p-8 text-center bg-transparent md:bg-white md:rounded-xl md:shadow-sm md:border md:border-gray-200">
         {/* Actik Logo */}
-        <h1 className="text-5xl md:text-4xl font-bold text-indigo-600 mb-1">
-          Actik
-        </h1>
+        <div className="flex justify-center mb-4">
+          <img src="/logo.png" alt="Actik Logo" className="h-20 md:h-24 w-auto" />
+        </div>
 
         {/* Tagline */}
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-6">

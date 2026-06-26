@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { QRCodeSVG } from 'qrcode.react'
 import { useZkVault } from '../../vault/zk-vault'
 import { readDisclosures, present } from '../../lib/sdjwt'
+import { useLanguage } from '../../lib/i18n'
 import { checkRateLimit } from '../../lib/rateLimit'
 import { Lock, CheckCircle, Copy, ExternalLink, Mail, Download, ChevronDown, ChevronUp, Calendar, AlertTriangle, Clock, Trash2 } from 'lucide-react'
 
@@ -52,6 +53,7 @@ export default function ShareCredential() {
   const [searchParams, setSearchParams] = useSearchParams()
   const step = searchParams.get('step') || 'sharing'
   const { unlockWithPin, unlockWithPasskey, decryptPayload, isUnlocked } = useZkVault()
+  const { t } = useLanguage()
 
   // Session & Loading states
   const [currentUser, setCurrentUser] = useState<any | null>(null)
@@ -77,15 +79,14 @@ export default function ShareCredential() {
   const [selectedFields, setSelectedFields] = useState<string[]>(['name', 'year'])
   const [expiryOption, setExpiryOption] = useState<ExpiryOption>('7days')
   const [customDate, setCustomDate] = useState('')
+  const [recipientLabel, setRecipientLabel] = useState('')
 
   // Share action states
   const [isSharing, setIsSharing] = useState(false)
   const [shareError, setShareError] = useState<string | null>(null)
-  const [createdShare, setCreatedShare] = useState<ShareRecord | null>(null)
+  const [createdShare, setCreatedShare] = useState<any | null>(null)
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({})
 
-  // Expose collapsible list state
-  const [pastSharesOpen, setPastSharesOpen] = useState(true)
 
   // Quick date calculations
   const calculateExpiryDate = useCallback((): Date => {
@@ -158,19 +159,6 @@ export default function ShareCredential() {
 
 
 
-      // Fetch past shares
-      const sharesRes = await supabase
-        .from('shares')
-        .select('id, owner, presentation, issuer_did, revealed, expires_at, created_at')
-        .eq('owner', user.id)
-        .order('created_at', { ascending: false })
-
-      if (sharesRes.error) throw sharesRes.error
-
-      const sharesList: ShareRecord[] = (sharesRes.data || [])
-        .filter((s: any) => s.issuer_did === credData.issuer_did || s.presentation)
-
-      setPastShares(sharesList)
       setLoading(false)
     } catch {
       setLoadError('error')
@@ -429,7 +417,8 @@ export default function ShareCredential() {
         issuer_did: credential.issuer_did || '',
         revealed: selectedFields,
         expires_at: expiry.toISOString(),
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        recipient_label: recipientLabel.trim() || null
       })
 
       if (res.error) {
@@ -448,7 +437,6 @@ export default function ShareCredential() {
       }
 
       setCreatedShare(shareRecord)
-      setPastShares(prev => [shareRecord, ...prev])
       setIsSharing(false)
       setSearchParams({ step: 'success' })
     } catch (err: any) {
@@ -494,24 +482,6 @@ export default function ShareCredential() {
     img.src = imgSource
   }
 
-  // Revoke past share link
-  const handleRevokeShare = async (shareId: string) => {
-    try {
-      const { error } = await supabase
-        .from('shares')
-        .delete()
-        .eq('id', shareId)
-
-      if (error) throw error
-
-      setPastShares(prev => prev.filter(s => s.id !== shareId))
-      if (createdShare?.id === shareId) {
-        setCreatedShare(null)
-      }
-    } catch {
-      alert('Failed to revoke link. Please try again.')
-    }
-  }
 
   // --- RENDER GATES ---
 
@@ -598,14 +568,14 @@ export default function ShareCredential() {
 
       {/* Back Link */}
       <Link to="/app/wallet" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem', color: 'var(--muted)', textDecoration: 'none', marginBottom: '1.25rem' }}>
-        ← Back to wallet
+        ← {t('wallet.back_to_wallet')}
       </Link>
 
       {/* Heading */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>Share credential</h2>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>{t('wallet.share_heading')}</h2>
         <p className="muted" style={{ margin: 0, fontSize: '0.95rem' }}>
-          Choose what to reveal and how long the link stays active
+          {t('wallet.share_subheading')}
         </p>
       </div>
 
@@ -622,11 +592,11 @@ export default function ShareCredential() {
           </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', fontSize: '0.78rem', color: 'var(--muted)' }}>
             <div>
-              <span>Issued on: </span>
+              <span>{t('wallet.issue_date')}: </span>
               <strong>{new Date(credential.created_at).toLocaleDateString()}</strong>
             </div>
             <div>
-              <span>Issuer DID: </span>
+              <span>{t('wallet.issuer_did')}: </span>
               <code className="mono" style={{ color: 'var(--forest)' }}>
                 {truncateDid(credential.issuer_did)}
               </code>
@@ -643,11 +613,11 @@ export default function ShareCredential() {
           <div style={{ color: '#4f46e5', fontSize: '2.5rem', marginBottom: '0.5rem' }}>
             <Lock size={36} style={{ margin: '0 auto' }} />
           </div>
-          <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>Unlock your vault to continue</h3>
+          <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>{t('wallet.unlock_vault_to_continue')}</h3>
           <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1.5rem', maxWidth: '320px', margin: '0.5rem auto 1.5rem' }}>
             {unlockMethod === 'passkey' || unlockMethod === 'biometric'
-              ? 'Tap "Unlock vault" — your device will ask for biometric confirmation.'
-              : 'Enter your vault PIN to select which fields to share.'}
+              ? t('wallet.unlock_vault_desc_passkey')
+              : t('wallet.unlock_vault_desc_pin')}
           </p>
           <button 
             className="primary"
@@ -692,7 +662,7 @@ export default function ShareCredential() {
               fontWeight: 600
             }}
           >
-            {isUnlocking ? 'Authenticating...' : 'Unlock vault'}
+            {isUnlocking ? t('wallet.authenticating') : t('wallet.unlock_vault_btn')}
           </button>
         </div>
       )}
@@ -725,7 +695,7 @@ export default function ShareCredential() {
                   {step === 'success' ? '✓' : '1'}
                 </div>
                 <span className="text-[11px] font-bold tracking-tight text-indigo-650">
-                  Configure
+                  {t('wallet.step_configure')}
                 </span>
               </div>
 
@@ -741,7 +711,7 @@ export default function ShareCredential() {
                 <span className={`text-[11px] font-bold tracking-tight ${
                   step === 'success' ? 'text-indigo-650' : 'text-stone-400'
                 }`}>
-                  Generate
+                  {t('wallet.step_generate')}
                 </span>
               </div>
             </div>
@@ -750,7 +720,7 @@ export default function ShareCredential() {
           {/* Status Pill */}
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <span className="pill ok" style={{ backgroundColor: '#e2efe7', color: 'var(--ok)', fontWeight: 600, padding: '0.25rem 0.65rem' }}>
-              ✓ Vault unlocked
+              ✓ {t('wallet.vault_unlocked')}
             </span>
           </div>
 
@@ -760,10 +730,10 @@ export default function ShareCredential() {
               {/* FIELD PICKER */}
               <div className="card" style={{ padding: '1.5rem', background: '#fff', textAlign: 'left' }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>
-                  Choose what to share
+                  {t('wallet.choose_what_to_share')}
                 </h3>
                 <p className="muted" style={{ fontSize: '0.82rem', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-                  The employer will only see the fields you select. Hidden fields are mathematically absent from the share link.
+                  {t('wallet.choose_what_to_share_desc')}
                 </p>
 
                 {/* Field Rows */}
@@ -773,48 +743,48 @@ export default function ShareCredential() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Lock size={14} style={{ color: 'var(--muted)' }} />
-                      <span style={{ fontWeight: 600 }}>Issuer DID</span>
+                      <span style={{ fontWeight: 600 }}>{t('wallet.issuer_did')}</span>
                       <code className="mono" style={{ color: 'var(--muted)', fontSize: '0.72rem' }}>
                         {truncateDid(credential?.issuer_did || '')}
                       </code>
                     </div>
-                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>{t('wallet.always_shown')}</span>
                   </div>
 
                   {/* ALWAYS SHOWN: Institution */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Lock size={14} style={{ color: 'var(--muted)' }} />
-                      <span style={{ fontWeight: 600 }}>Institution name</span>
+                      <span style={{ fontWeight: 600 }}>{t('wallet.institution_name')}</span>
                       <span style={{ color: 'var(--muted)' }}>
                         {credential?.institution_name}
                       </span>
                     </div>
-                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>{t('wallet.always_shown')}</span>
                   </div>
 
                   {/* ALWAYS SHOWN: Degree */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Lock size={14} style={{ color: 'var(--muted)' }} />
-                      <span style={{ fontWeight: 600 }}>Degree title</span>
+                      <span style={{ fontWeight: 600 }}>{t('wallet.degree_title')}</span>
                       <span style={{ color: 'var(--muted)' }}>
                         {credential?.degree_title}
                       </span>
                     </div>
-                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>{t('wallet.always_shown')}</span>
                   </div>
 
                   {/* ALWAYS SHOWN: Issue date */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbf9', borderBottom: '1px solid var(--line)', padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Lock size={14} style={{ color: 'var(--muted)' }} />
-                      <span style={{ fontWeight: 600 }}>Issue date</span>
+                      <span style={{ fontWeight: 600 }}>{t('wallet.issue_date')}</span>
                       <span style={{ color: 'var(--muted)' }}>
                         {credential && new Date(credential.created_at).toLocaleDateString()}
                       </span>
                     </div>
-                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>Always shown</span>
+                    <span className="muted" style={{ fontSize: '0.72rem', fontStyle: 'italic' }}>{t('wallet.always_shown')}</span>
                   </div>
 
                   {/* SELECTABLE: Full name */}
@@ -827,7 +797,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('name')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Full name</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.student_name').replace(':', '')}</strong>
                         <span className="muted">{availableClaims.name}</span>
                       </label>
                     </div>
@@ -843,7 +813,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('email')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Student Email</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.student_email').replace(':', '')}</strong>
                         <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.email}</span>
                       </label>
                     </div>
@@ -859,7 +829,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('student_id')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Student ID</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.student_id').replace(':', '')}</strong>
                         <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.student_id}</span>
                       </label>
                     </div>
@@ -875,7 +845,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('year')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Graduation year</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.graduation_date').replace(':', '')}</strong>
                         <span className="muted">{availableClaims.year}</span>
                       </label>
                     </div>
@@ -891,7 +861,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('graduation_date')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Graduation date</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.graduation_date').replace(':', '')}</strong>
                         <span className="muted">
                           {new Date(availableClaims.graduation_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
                         </span>
@@ -909,7 +879,7 @@ export default function ShareCredential() {
                           onChange={() => toggleSelectableField('certificate_id')}
                           style={{ width: 'auto' }}
                         />
-                        <strong style={{ fontWeight: 600 }}>Certificate ID</strong>
+                        <strong style={{ fontWeight: 600 }}>{t('wallet.certificate_id').replace(':', '')}</strong>
                         <span className="muted font-mono" style={{ fontSize: '0.78rem' }}>{availableClaims.certificate_id}</span>
                       </label>
                     </div>
@@ -1007,7 +977,7 @@ export default function ShareCredential() {
                         <span className="muted">{availableClaims.gpa}</span>
                       </label>
                       <span className="pill gold" style={{ fontSize: '0.65rem', backgroundColor: '#f4e9d4', color: 'var(--gold)', fontWeight: 600 }}>
-                        Sensitive
+                        {t('wallet.sensitive')}
                       </span>
                     </div>
                   )}
@@ -1026,7 +996,7 @@ export default function ShareCredential() {
                         <span className="muted">{availableClaims.national_id}</span>
                       </label>
                       <span className="pill bad" style={{ fontSize: '0.65rem', backgroundColor: '#f3e0e0', color: 'var(--danger)', fontWeight: 600 }}>
-                        Private
+                        {t('wallet.private')}
                       </span>
                     </div>
                   )}
@@ -1052,9 +1022,9 @@ export default function ShareCredential() {
 
                 {/* LIVE FIELD PICKER SUMMARY */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', fontSize: '0.78rem', color: 'var(--muted)' }}>
-                  <span>Sharing {disclosedFieldsCount} of {totalFields} fields</span>
+                  <span>{t('wallet.sharing_fields').replace('{disclosed}', disclosedFieldsCount.toString()).replace('{total}', totalFields.toString())}</span>
                   {hiddenFields.length > 0 && (
-                    <span>Hidden: {hiddenFields.join(', ')}</span>
+                    <span>{t('wallet.hidden_fields').replace('{fields}', hiddenFields.join(', '))}</span>
                   )}
                 </div>
               </div>
@@ -1062,10 +1032,23 @@ export default function ShareCredential() {
               {/* STEP 3: SET EXPIRY */}
               <div className="card" style={{ padding: '1.5rem', background: '#fff', textAlign: 'left' }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>
-                  How long should this link work?
+                  {t('wallet.who_is_this_for')}
+                </h3>
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <input
+                    type="text"
+                    value={recipientLabel}
+                    onChange={(e) => setRecipientLabel(e.target.value)}
+                    placeholder={t('wallet.recipient_placeholder')}
+                    style={{ width: '100%', padding: '0.6rem 0.8rem', fontSize: '0.9rem', borderRadius: '6px', border: '1px solid var(--line)' }}
+                  />
+                </div>
+
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--forest)', margin: '0 0 0.25rem' }}>
+                  {t('wallet.how_long_active')}
                 </h3>
                 <p className="muted" style={{ fontSize: '0.82rem', marginBottom: '1.25rem' }}>
-                  Choose a quick duration or set a custom expiry window.
+                  {t('wallet.duration_desc')}
                 </p>
 
                 {/* Duration choices row */}
@@ -1073,11 +1056,11 @@ export default function ShareCredential() {
                   {['1day', '7days', '30days', '90days', 'custom'].map((opt) => {
                     const isSelected = expiryOption === opt
                     const labels: Record<string, string> = {
-                      '1day': '1 Day',
-                      '7days': '7 Days',
-                      '30days': '30 Days',
-                      '90days': '90 Days',
-                      'custom': 'Custom'
+                      '1day': t('wallet.day_1'),
+                      '7days': t('wallet.days_7'),
+                      '30days': t('wallet.days_30'),
+                      '90days': t('wallet.days_90'),
+                      'custom': t('wallet.custom')
                     }
                     return (
                       <button
@@ -1106,7 +1089,7 @@ export default function ShareCredential() {
                 {expiryOption === 'custom' && (
                   <div style={{ marginBottom: '1rem' }}>
                     <label style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '0.82rem', marginBottom: '0.4rem', display: 'block' }}>
-                      Choose expiration date
+                      {t('wallet.choose_expiration_date')}
                     </label>
                     <div style={{ position: 'relative' }}>
                       <input
@@ -1126,7 +1109,7 @@ export default function ShareCredential() {
                 <div style={{ fontSize: '0.85rem', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.25rem' }}>
                   <Clock size={15} />
                   <span>
-                    Link expires on: <strong>{liveExpiry.toLocaleString()}</strong>
+                    {t('wallet.link_expires_on')} <strong>{liveExpiry.toLocaleString()}</strong>
                   </span>
                 </div>
 
@@ -1134,7 +1117,7 @@ export default function ShareCredential() {
                 <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', padding: '0.8rem 1rem', backgroundColor: 'var(--paper)', borderRadius: '8px', border: '1px solid var(--line)', fontSize: '0.78rem', color: 'var(--muted)', lineHeight: '1.4' }}>
                   <AlertTriangle size={16} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: '0.1rem' }} />
                   <p style={{ margin: 0 }}>
-                    After expiry, this link stops working. The employer cannot re-open it. You can always create a new share link.
+                    {t('wallet.expiry_warning')}
                   </p>
                 </div>
               </div>
@@ -1171,7 +1154,7 @@ export default function ShareCredential() {
                 {isSharing && (
                   <div style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
                 )}
-                <span>Create share link</span>
+                <span>{t('wallet.create_share_link')}</span>
               </button>
             </>
           )}
@@ -1184,7 +1167,7 @@ export default function ShareCredential() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <CheckCircle size={20} style={{ color: '#10b981' }} />
                 <h3 style={{ margin: 0, color: '#10b981', fontSize: '1.1rem', fontWeight: 600 }}>
-                  Share link created
+                  {t('wallet.share_link_created')}
                 </h3>
               </div>
 
@@ -1216,7 +1199,7 @@ export default function ShareCredential() {
                     style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem', margin: 0 }}
                   >
                     <Copy size={14} />
-                    <span>{copiedStates['main'] ? 'Copied!' : 'Copy link'}</span>
+                    <span>{copiedStates['main'] ? t('wallet.copied') : t('wallet.copy_link')}</span>
                   </button>
 
                   <a
@@ -1227,7 +1210,7 @@ export default function ShareCredential() {
                     style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', textDecoration: 'none', border: '1px solid var(--line)', borderRadius: '8px', color: 'var(--ink)' }}
                   >
                     <ExternalLink size={14} />
-                    <span>Open</span>
+                    <span>{t('wallet.open')}</span>
                   </a>
                 </div>
               </div>
@@ -1251,7 +1234,7 @@ export default function ShareCredential() {
                   style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}
                 >
                   <Download size={14} />
-                  <span>Download QR PNG</span>
+                  <span>{t('wallet.download_qr_png')}</span>
                 </button>
 
                 <a
@@ -1260,14 +1243,14 @@ export default function ShareCredential() {
                   style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', textDecoration: 'none', border: '1px solid var(--line)', borderRadius: '8px', color: 'var(--ink)' }}
                 >
                   <Mail size={14} />
-                  <span>Email employer</span>
+                  <span>{t('wallet.email_employer')}</span>
                 </a>
               </div>
 
               {/* Share Summary block */}
               <div style={{ backgroundColor: 'var(--paper)', borderRadius: '8px', padding: '1rem', border: '1px solid var(--line)', fontSize: '0.8rem', lineHeight: '1.4' }}>
                 <div style={{ margin: '0 0 0.4rem' }}>
-                  <span className="muted">Disclosed fields: </span>
+                  <span className="muted">{t('wallet.disclosed_fields')} </span>
                   <strong>{['Issuer DID', 'Institution', 'Degree title', 'Issue date', ...selectedFields.map(f => {
                     if (f === 'name') return 'Full name'
                     if (f === 'year') return 'Graduation year'
@@ -1289,18 +1272,18 @@ export default function ShareCredential() {
                   </div>
                 )}
                 <div style={{ margin: '0 0 0.4rem' }}>
-                  <span className="muted">Expires: </span>
+                  <span className="muted">{t('wallet.expires')} </span>
                   <strong>{liveExpiry.toLocaleString()}</strong>
                 </div>
                 <div>
-                  <span className="muted">Token: </span>
+                  <span className="muted">{t('wallet.token')} </span>
                   <code className="mono">{createdShare.id.slice(0, 8)}...</code>
                 </div>
               </div>
 
               {/* Final Warning banner */}
               <p className="muted" style={{ margin: 0, fontSize: '0.72rem', textAlign: 'center', color: 'var(--danger)' }}>
-                ⚠ Anyone with this link can verify your credential until it expires. Do not share it publicly.
+                {t('wallet.share_warning')}
               </p>
 
             </div>
@@ -1310,14 +1293,14 @@ export default function ShareCredential() {
           {step === 'success' && !createdShare && (
             <div className="card text-center" style={{ padding: '2.5rem 1.5rem', background: '#fff' }}>
               <p className="muted" style={{ marginBottom: '1.5rem', fontSize: '0.85rem' }}>
-                No active share link has been created during this session.
+                {t('wallet.no_active_share_link')}
               </p>
               <button 
                 className="primary" 
                 onClick={() => setSearchParams({ step: 'sharing' })}
                 style={{ backgroundColor: '#4f46e5', border: 'none', borderRadius: '8px', padding: '0.6rem 1rem', color: '#fff', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 }}
               >
-                Go to Configure step
+                {t('wallet.go_to_configure_step')}
               </button>
             </div>
           )}
@@ -1326,131 +1309,13 @@ export default function ShareCredential() {
       )}
 
       {/* =======================================================
-          5. PAST SHARE LINKS SECTION (Requirement 9)
+          5. PAST SHARE LINKS (Redirect)
          ======================================================= */}
       {decryptedSDJwt && (step === 'sharing' || step === 'success') && (
-        <div style={{ marginTop: '2.5rem', borderTop: '1px solid var(--line)', paddingTop: '1.5rem' }}>
-        <button
-          type="button"
-          onClick={() => setPastSharesOpen(!pastSharesOpen)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            color: 'var(--forest)',
-            fontSize: '1.1rem',
-            fontWeight: 600,
-            marginBottom: '1rem'
-          }}
-        >
-          <span>Previous share links ({pastShares.length})</span>
-          {pastSharesOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </button>
-
-        {pastSharesOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {pastShares.length === 0 ? (
-              <p className="muted" style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
-                No share links generated for this credential yet.
-              </p>
-            ) : (
-              pastShares.map((share) => {
-                const isExpired = new Date(share.expires_at) < new Date()
-                const shareUrlStr = `${window.location.origin}/verify/${share.id}`
-                
-                // Map fields to labels
-                const labels = (share.revealed || []).map(f => {
-                  if (f === 'name') return 'Full name'
-                  if (f === 'year') return 'Graduation year'
-                  if (f === 'gpa') return 'GPA'
-                  if (f === 'national_id') return 'National ID'
-                  if (f === 'notes') return 'Additional notes'
-                  if (f === 'email') return 'Email address'
-                  if (f === 'student_id') return 'Student ID'
-                  if (f === 'graduation_date') return 'Graduation date'
-                  if (f === 'certificate_id') return 'Certificate ID'
-                  if (f === 'photo') return 'Student photo'
-                  return f
-                })
-                
-                return (
-                  <div
-                    key={share.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      backgroundColor: 'var(--surface)',
-                      border: '1px solid var(--line)',
-                      borderRadius: '8px',
-                      padding: '0.75rem 1rem',
-                      fontSize: '0.82rem',
-                      flexWrap: 'wrap',
-                      gap: '0.75rem'
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: '220px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                        <span className={`pill ${isExpired ? 'bad' : 'ok'}`} style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', backgroundColor: isExpired ? '#f3e0e0' : '#e2efe7', color: isExpired ? 'var(--danger)' : 'var(--ok)' }}>
-                          {isExpired ? 'Expired' : 'Active'}
-                        </span>
-                        <code className="mono" style={{ fontSize: '0.72rem' }}>{share.id.slice(0, 8)}...</code>
-                      </div>
-                      
-                      <div style={{ margin: '0.2rem 0' }}>
-                        <span className="muted">Fields: </span>
-                        <strong>{['Issuer DID', 'Institution', 'Degree', 'Issue date', ...labels].join(', ')}</strong>
-                      </div>
-                      
-                      <div className="muted" style={{ fontSize: '0.72rem' }}>
-                        Expires: {new Date(share.expires_at).toLocaleString()}
-                      </div>
-                    </div>
-
-                    {/* Quick copy / Revoke buttons */}
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => handleCopyText(shareUrlStr, share.id)}
-                        style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem', margin: 0 }}
-                      >
-                        <Copy size={12} />
-                        <span>{copiedStates[share.id] ? 'Copied' : 'Copy'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRevokeShare(share.id)}
-                        style={{
-                          padding: '0.35rem 0.6rem',
-                          fontSize: '0.75rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          backgroundColor: 'transparent',
-                          border: '1px solid var(--danger)',
-                          color: 'var(--danger)',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          margin: 0
-                        }}
-                      >
-                        <Trash2 size={12} />
-                        <span>Revoke</span>
-                      </button>
-                    </div>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        )}
+        <div style={{ marginTop: '2.5rem', borderTop: '1px solid var(--line)', paddingTop: '1.5rem', textAlign: 'center' }}>
+          <p className="muted" style={{ fontSize: '0.9rem' }}>
+            {t('wallet.view_past_share_links')}<Link to="/app/activity" style={{ fontWeight: 600, color: 'var(--forest)' }}>{t('wallet.activity')}</Link>.
+          </p>
         </div>
       )}
 
@@ -1475,15 +1340,15 @@ export default function ShareCredential() {
         >
           <div className="card" style={{ maxWidth: '380px', width: '100%', padding: '2rem 1.5rem', textAlign: 'center', background: '#fff', margin: 0 }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔒</div>
-            <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>Unlock Your Vault</h3>
+            <h3 style={{ margin: '0 0 0.5rem', color: 'var(--forest)' }}>{t('wallet.unlock_vault_title')}</h3>
             <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-              Your encryption keys are derived locally. Please unlock your vault to process this credential.
+              {t('wallet.unlock_vault_modal_desc')}
             </p>
 
             {unlockMethod === 'pin' && (
               <form onSubmit={handleUnlockSubmit}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem', textAlign: 'left' }}>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>Enter Vault PIN</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>{t('wallet.enter_vault_pin')}</label>
                   <input
                     type="password"
                     value={pinInput}
@@ -1523,7 +1388,7 @@ export default function ShareCredential() {
                     {isUnlocking && (
                       <div style={{ animation: 'spin 1s linear infinite', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
                     )}
-                    <span>Unlock with PIN</span>
+                    <span>{t('wallet.unlock_with_pin')}</span>
                   </button>
 
                   <button
@@ -1536,7 +1401,7 @@ export default function ShareCredential() {
                     disabled={isUnlocking}
                     style={{ width: '100%', borderColor: 'transparent', color: 'var(--muted)', margin: 0 }}
                   >
-                    Cancel
+                    {t('wallet.cancel')}
                   </button>
                 </div>
               </form>
@@ -1555,16 +1420,16 @@ export default function ShareCredential() {
                       margin: '0.5rem auto'
                     }} />
                     <p style={{ fontSize: '0.9rem', color: 'var(--forest)', fontWeight: 500, margin: 0 }}>
-                      Authenticating...
+                      {t('wallet.authenticating')}
                     </p>
                     <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
-                      Complete the biometric prompt on your device
+                      {t('wallet.complete_biometric')}
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="muted" style={{ fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
-                      Your device will ask for biometric confirmation.
+                      {t('wallet.device_ask_biometric')}
                     </p>
                     {unlockError && (
                       <p style={{ color: 'var(--danger)', fontSize: '0.8rem', margin: '0 0 0.5rem', fontWeight: 500 }}>
@@ -1586,7 +1451,7 @@ export default function ShareCredential() {
                         fontWeight: 600
                       }}
                     >
-                      Try again
+                      {t('wallet.try_again')}
                     </button>
                   </>
                 )}
@@ -1604,7 +1469,7 @@ export default function ShareCredential() {
                     opacity: isUnlocking ? 0.5 : 1
                   }}
                 >
-                  Cancel
+                  {t('wallet.cancel')}
                 </button>
               </div>
             )}
@@ -1612,7 +1477,7 @@ export default function ShareCredential() {
             {(unlockMethod === 'both' || unlockMethod === null) && (
               <form onSubmit={handleUnlockSubmit}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem', textAlign: 'left' }}>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>Enter Vault PIN</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)' }}>{t('wallet.enter_vault_pin')}</label>
                   <input
                     type="password"
                     value={pinInput}
@@ -1652,7 +1517,7 @@ export default function ShareCredential() {
                     {isUnlocking && (
                       <div style={{ animation: 'spin 1s linear infinite', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%' }}></div>
                     )}
-                    <span>Unlock with PIN</span>
+                    <span>{t('wallet.unlock_with_pin')}</span>
                   </button>
 
                   <button
@@ -1669,7 +1534,7 @@ export default function ShareCredential() {
                       margin: 0
                     }}
                   >
-                    <span>🔑 Unlock with Passkey</span>
+                    <span>{t('wallet.unlock_with_passkey')}</span>
                   </button>
 
                   <button
@@ -1682,7 +1547,7 @@ export default function ShareCredential() {
                     disabled={isUnlocking}
                     style={{ width: '100%', borderColor: 'transparent', color: 'var(--muted)', margin: 0 }}
                   >
-                    Cancel
+                    {t('wallet.cancel')}
                   </button>
                 </div>
               </form>

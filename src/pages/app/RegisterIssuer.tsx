@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { generateIssuerKeys, didWeb } from '../../lib/did'
+import { useLanguage } from '../../lib/i18n'
 
 // Shared keyframe spinner animation
 const spinStyles = `
@@ -25,6 +26,7 @@ interface IssuerData {
 }
 
 export default function RegisterIssuer() {
+  const { t } = useLanguage()
   const navigate = useNavigate()
   const [currentUser, setCurrentUser] = useState<any | null>(null)
   
@@ -61,15 +63,15 @@ export default function RegisterIssuer() {
           setCurrentUser(session.user)
         }
 
-        // Try querying by user_id first
+        // Try querying by owner
         let { data, error } = await supabase
           .from('issuers')
           .select('*')
-          .eq('user_id', session.user.id)
+          .eq('owner', session.user.id)
           .maybeSingle()
 
-        // Fallback to querying by owner if user_id column doesn't exist
-        if (error && (error.message.includes('user_id') || error.code === 'PGRST204')) {
+        // Fallback to querying by owner if owner column doesn't exist
+        if (error && (error.message.includes('owner') || error.code === 'PGRST204')) {
           const fallback = await supabase
             .from('issuers')
             .select('*')
@@ -197,7 +199,7 @@ export default function RegisterIssuer() {
           borderRadius: '50%',
           animation: 'spin 1s linear infinite'
         }}></div>
-        <p className="muted" style={{ marginTop: '1rem' }}>Checking registration status...</p>
+        <p className="muted" style={{ marginTop: '1rem' }}>{t('dashboard.checking_registration')}</p>
       </div>
     )
   }
@@ -209,24 +211,24 @@ export default function RegisterIssuer() {
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 md:p-8 text-center">
           <div className="text-5xl mb-4">🏛️</div>
-          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Institution Already Registered</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">{t('dashboard.inst_already_registered')}</h2>
           <p className="text-sm text-stone-500 mb-6 leading-relaxed">
-            Your account is linked to the following institution profile:
+            {t('dashboard.inst_linked_desc')}
           </p>
 
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-left text-sm space-y-3">
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Name</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.inst_name')}</span>
               <strong className="text-gray-900 text-base">{existingIssuer.name}</strong>
             </div>
             {existingIssuer.domain && (
               <div>
-                <span className="text-xs text-gray-400 block font-medium">Domain</span>
+                <span className="text-xs text-gray-400 block font-medium">{t('dashboard.inst_domain')}</span>
                 <strong className="text-gray-900">{existingIssuer.domain}</strong>
               </div>
             )}
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Decentralised ID (DID)</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.inst_did')}</span>
               <code className="mono block bg-gray-100 p-2 rounded text-xs mt-1 overflow-x-auto">
                 {existingIssuer.did}
               </code>
@@ -236,11 +238,11 @@ export default function RegisterIssuer() {
           <div className="mb-6">
             {isAccredited ? (
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                Accredited by MoEYS
+                {t('dashboard.accredited_badge')}
               </span>
             ) : (
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                Pending MoEYS approval
+                {t('dashboard.pending_badge')}
               </span>
             )}
           </div>
@@ -251,18 +253,18 @@ export default function RegisterIssuer() {
                 className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
                 onClick={() => navigate('/app/issue')}
               >
-                Issue a credential
+                {t('dashboard.issue_credential')}
               </button>
             ) : (
               <p className="text-xs text-red-600 font-semibold italic">
-                You cannot issue credentials until MoEYS approves your institution.
+                {t('dashboard.cannot_issue_until_approved')}
               </p>
             )}
             <button 
               className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
               onClick={() => navigate('/app/dashboard')}
             >
-              Go to dashboard
+              {t('account.go_dashboard')}
             </button>
           </div>
         </div>
@@ -276,15 +278,15 @@ export default function RegisterIssuer() {
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 md:p-8 text-center">
           <div className="text-5xl text-emerald-500 mb-4">✓</div>
-          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Institution Registered</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">{t('dashboard.inst_registered')}</h2>
           
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-left text-sm space-y-3">
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Name</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.inst_name')}</span>
               <strong className="text-gray-900 text-base">{registeredSuccess.name}</strong>
             </div>
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Decentralised ID (DID)</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.inst_did')}</span>
               <code className="mono block bg-gray-100 p-2 rounded text-xs mt-1 overflow-x-auto">
                 {registeredSuccess.did}
               </code>
@@ -293,17 +295,17 @@ export default function RegisterIssuer() {
 
           <div className="mb-6">
             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-              Pending MoEYS approval
+              {t('dashboard.pending_badge')}
             </span>
           </div>
 
           <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded text-left text-xs text-amber-800 leading-relaxed mb-6">
-            <p className="font-bold mb-1">Next Steps:</p>
+            <p className="font-bold mb-1">{t('dashboard.next_steps')}</p>
             <ul className="list-disc pl-4 space-y-1">
-              <li>Your institution has been added to the Actik registry.</li>
-              <li>MoEYS will review and approve your institution.</li>
-              <li>You will be able to issue credentials once approved.</li>
-              <li>Your private signing key is stored in this browser session only.</li>
+              <li>{t('dashboard.step_added_registry')}</li>
+              <li>{t('dashboard.step_moeys_review')}</li>
+              <li>{t('dashboard.step_can_issue')}</li>
+              <li>{t('dashboard.step_key_stored')}</li>
             </ul>
           </div>
 
@@ -312,13 +314,13 @@ export default function RegisterIssuer() {
               className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
               onClick={() => navigate('/app/issue')}
             >
-              Issue a credential
+              {t('dashboard.issue_credential')}
             </button>
             <button 
               className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
               onClick={() => navigate('/app/dashboard')}
             >
-              Go to dashboard
+              {t('account.go_dashboard')}
             </button>
           </div>
         </div>
@@ -334,10 +336,10 @@ export default function RegisterIssuer() {
       {/* Headers */}
       <div className="mb-6">
         <h2 className="text-xl md:text-2xl font-bold text-stone-900 tracking-tight">
-          Register your institution
+          {t('dashboard.register_inst_title')}
         </h2>
         <p className="text-sm text-stone-500 mt-1 leading-relaxed">
-          Once approved by MoEYS, your institution can issue digital credentials.
+          {t('dashboard.register_inst_desc')}
         </p>
       </div>
 
@@ -347,7 +349,7 @@ export default function RegisterIssuer() {
           
           {/* Institution Name */}
           <div>
-            <label className="text-xs md:text-sm font-bold text-gray-700 block">Institution name</label>
+            <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.inst_name_label')}</label>
             <input
               type="text"
               value={name}
@@ -362,7 +364,7 @@ export default function RegisterIssuer() {
 
           {/* Domain */}
           <div>
-            <label className="text-xs md:text-sm font-bold text-gray-700 block">Domain</label>
+            <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.domain_label')}</label>
             <input
               type="text"
               value={domain}
@@ -372,7 +374,7 @@ export default function RegisterIssuer() {
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
             />
             <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
-              Use your institution's official web domain. This becomes part of your digital identity (did:web:rupp.edu.kh)
+              {t('dashboard.domain_help')}
             </p>
             {errors.domain && (
               <p className="text-red-600 text-xs mt-1 font-semibold">{errors.domain}</p>
@@ -386,23 +388,23 @@ export default function RegisterIssuer() {
               onClick={() => setDidExplanationExpanded(!didExplanationExpanded)}
               className="w-full px-4 py-2.5 flex justify-between items-center bg-transparent border-none cursor-pointer text-left text-xs md:text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
             >
-              <span>What is a DID?</span>
+              <span>{t('dashboard.what_is_did')}</span>
               <span>{didExplanationExpanded ? '▲' : '▼'}</span>
             </button>
             
             {didExplanationExpanded && (
               <div className="px-4 pb-3 text-xs text-gray-500 leading-relaxed space-y-2">
                 <p>
-                  A DID (Decentralised Identifier) is a unique digital identity for your institution.
+                  {t('dashboard.did_desc1')}
                 </p>
                 <p className="font-semibold">
-                  Example: <code className="mono block bg-gray-150 px-2 py-0.5 rounded text-stone-700 mt-0.5">did:web:rupp.edu.kh</code>
+                  {t('dashboard.did_example')} <code className="mono block bg-gray-150 px-2 py-0.5 rounded text-stone-700 mt-0.5">did:web:rupp.edu.kh</code>
                 </p>
                 <p>
-                  It is tied to your domain and used to digitally sign every credential you issue.
+                  {t('dashboard.did_desc2')}
                 </p>
                 <p>
-                  Employers can verify credentials were signed by your institution without contacting you.
+                  {t('dashboard.did_desc3')}
                 </p>
               </div>
             )}
@@ -410,13 +412,13 @@ export default function RegisterIssuer() {
 
           {/* Institution Type */}
           <div>
-            <label className="text-xs md:text-sm font-bold text-gray-700 block">Institution type</label>
+            <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.inst_type_label')}</label>
             <select
               value={type}
               onChange={(e) => setType(e.target.value)}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
             >
-              <option value="">Select type...</option>
+              <option value="">{t('dashboard.select_type')}</option>
               <option value="University">University</option>
               <option value="Ministry">Ministry</option>
               <option value="Training centre">Training centre</option>
@@ -450,7 +452,7 @@ export default function RegisterIssuer() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
             )}
-            <span>Register Institution</span>
+            <span>{t('dashboard.register_btn_text')}</span>
           </button>
         </form>
       </div>

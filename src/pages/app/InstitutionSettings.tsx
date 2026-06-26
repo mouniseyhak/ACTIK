@@ -10,8 +10,16 @@ import {
   Copy, 
   Check, 
   Calendar, 
-  ArrowRight
+  ArrowRight,
+  Plus,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  Save,
+  Link2
 } from 'lucide-react'
+import { useLanguage } from '../../lib/i18n'
+import LanguageSwitcher from '../../components/LanguageSwitcher'
 
 interface IssuerInfo {
   id: string
@@ -29,6 +37,7 @@ interface IssuerInfo {
 
 export default function InstitutionSettings() {
   const navigate = useNavigate()
+  const { t, language, setLanguage } = useLanguage()
   const [currentUser, setCurrentUser] = useState<any | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -48,9 +57,9 @@ export default function InstitutionSettings() {
       await navigator.clipboard.writeText(text)
       setCopiedKey(true)
       setTimeout(() => setCopiedKey(false), 2000)
-      showToast('Copied to clipboard!')
+      showToast(t('settings.copied'))
     } catch {
-      showToast('Failed to copy.')
+      showToast(t('settings.copy_failed'))
     }
   }
 
@@ -71,7 +80,7 @@ export default function InstitutionSettings() {
         const fallback = await supabase
           .from('issuers')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('owner', user.id)
           .maybeSingle()
         data = fallback.data
         error = fallback.error
@@ -149,8 +158,8 @@ export default function InstitutionSettings() {
 
     if (issuer.revoked_at) {
       return {
-        label: 'Accreditation Revoked',
-        desc: `Accreditation revoked on ${new Date(issuer.revoked_at).toLocaleDateString()}`,
+        label: t('settings.accreditation_revoked'),
+        desc: `${t('settings.accreditation_revoked_on')} ${new Date(issuer.revoked_at).toLocaleDateString()}`,
         badgeStyle: 'bg-red-50 text-red-700 border-red-200',
         icon: <ShieldAlert size={20} className="text-red-500" />
       }
@@ -158,16 +167,16 @@ export default function InstitutionSettings() {
 
     if (issuer.accredited) {
       return {
-        label: 'Accredited',
-        desc: `Approved by MoEYS${issuer.accredited_at ? ` on ${new Date(issuer.accredited_at).toLocaleDateString()}` : ''}`,
+        label: t('settings.accredited'),
+        desc: `${t('settings.approved_by_moeys')}${issuer.accredited_at ? ` ${t('settings.approved_by_moeys_on')} ${new Date(issuer.accredited_at).toLocaleDateString()}` : ''}`,
         badgeStyle: 'bg-emerald-50 text-emerald-700 border-emerald-200',
         icon: <ShieldCheck size={20} className="text-emerald-500" />
       }
     }
 
     return {
-      label: 'Pending Approval',
-      desc: 'Awaiting MoEYS approval',
+      label: t('settings.pending_approval'),
+      desc: t('settings.awaiting_moeys_approval'),
       badgeStyle: 'bg-amber-50 text-amber-700 border-amber-200',
       icon: <Award size={20} className="text-amber-500" />
     }
@@ -179,28 +188,28 @@ export default function InstitutionSettings() {
     <div className="w-full md:max-w-3xl mx-auto pb-24 px-4 md:px-0">
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-2xl md:text-3xl font-bold text-stone-900 tracking-tight">Institution Settings</h2>
+        <h2 className="text-2xl md:text-3xl font-bold text-stone-900 tracking-tight">{t('settings.title')}</h2>
         <p className="text-sm text-stone-500 mt-1">
-          Manage your institution profile
+          {t('settings.subtitle')}
         </p>
       </div>
 
       {loading && (
         <div className="flex flex-col items-center justify-center py-20 bg-white border border-gray-200 rounded-2xl shadow-sm">
           <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-200 border-t-indigo-600" />
-          <p className="text-stone-500 mt-4 font-medium">Loading settings...</p>
+          <p className="text-stone-500 mt-4 font-medium">{t('settings.status_loading')}</p>
         </div>
       )}
 
       {loadError && !loading && (
         <div className="w-full bg-red-50 border border-red-200 text-red-700 rounded-2xl p-6 text-center shadow-sm">
-          <h3 className="font-semibold text-red-900 text-lg mb-2">Failed to load profile</h3>
-          <p className="text-sm text-red-700 mb-4">An error occurred while connecting to Supabase.</p>
+          <h3 className="font-semibold text-red-900 text-lg mb-2">{t('settings.status_failed')}</h3>
+          <p className="text-sm text-red-700 mb-4">{t('settings.status_error')}</p>
           <button 
             className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-semibold h-11 px-6 rounded-lg text-sm transition-colors cursor-pointer" 
             onClick={() => fetchIssuerProfile(currentUser)}
           >
-            Retry
+            {t('settings.retry_btn')}
           </button>
         </div>
       )}
@@ -210,15 +219,15 @@ export default function InstitutionSettings() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 mb-4">
             <Building2 size={32} />
           </div>
-          <h3 className="text-lg font-bold text-stone-900">No Institution Registered</h3>
+          <h3 className="text-lg font-bold text-stone-900">{t('settings.no_inst_registered')}</h3>
           <p className="text-sm text-stone-500 max-w-sm mx-auto mt-2 mb-6 leading-relaxed">
-            Your issuer profile has not been configured. To sign digital credentials on behalf of your institution, you must complete the registration first.
+            {t('settings.no_inst_desc')}
           </p>
           <button
             onClick={() => navigate('/app/register-issuer')}
             className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 px-6 rounded-lg text-sm flex items-center justify-center gap-1.5 mx-auto cursor-pointer shadow-sm"
           >
-            <span>Register Institution</span>
+            <span>{t('settings.register_inst_btn')}</span>
             <ArrowRight size={16} />
           </button>
         </div>
@@ -226,33 +235,37 @@ export default function InstitutionSettings() {
 
       {!loading && !loadError && issuer && (
         <div className="space-y-6">
+          
+          {/* Language Switcher Card */}
+          <LanguageSwitcher prefix="settings" />
+
           {/* Card A: Institution Profile Card */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-sm font-bold text-stone-900 tracking-tight mb-5 flex items-center gap-2">
               <Building2 size={18} className="text-indigo-500" />
-              <span>Institution Profile</span>
+              <span>{t('settings.inst_profile')}</span>
             </h3>
 
             <div className="space-y-3 text-sm">
               <div className="flex justify-between items-center py-2 border-b border-gray-100 gap-4">
-                <span className="text-gray-500 shrink-0">Official Name</span>
+                <span className="text-gray-500 shrink-0">{t('settings.official_name')}</span>
                 <strong className="text-stone-900 font-semibold text-right">{issuer.name}</strong>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100 gap-4">
-                <span className="text-gray-500 shrink-0">Institutional Domain</span>
+                <span className="text-gray-500 shrink-0">{t('settings.inst_domain')}</span>
                 <strong className="text-stone-900 font-medium flex items-center gap-1.5">
                   <Globe size={14} className="text-stone-400" />
                   <span>{issuer.domain}</span>
                 </strong>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-500">Institution Type</span>
+                <span className="text-gray-500">{t('settings.inst_type')}</span>
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
                   {issuer.type}
                 </span>
               </div>
               <div className={`flex justify-between items-center py-2 ${issuer.updated_at ? 'border-b border-gray-100' : ''}`}>
-                <span className="text-gray-500">Registered Date</span>
+                <span className="text-gray-500">{t('settings.registered_date')}</span>
                 <strong className="text-stone-900 font-medium flex items-center gap-1.5">
                   <Calendar size={14} className="text-stone-400" />
                   <span>{issuer.created_at ? new Date(issuer.created_at).toLocaleDateString() : 'N/A'}</span>
@@ -260,7 +273,7 @@ export default function InstitutionSettings() {
               </div>
               {issuer.updated_at && (
                 <div className="flex justify-between items-center py-2">
-                  <span className="text-gray-500">Updated Date</span>
+                  <span className="text-gray-500">{t('settings.updated_date')}</span>
                   <strong className="text-stone-900 font-medium flex items-center gap-1.5">
                     <Calendar size={14} className="text-stone-400" />
                     <span>{new Date(issuer.updated_at).toLocaleDateString()}</span>
@@ -275,13 +288,13 @@ export default function InstitutionSettings() {
             <div className="mb-4">
               <h3 className="text-sm font-bold text-stone-900 tracking-tight flex items-center gap-2">
                 <Globe size={18} className="text-indigo-500" />
-                <span>Decentralized Identifier (DID)</span>
+                <span>{t('settings.did_title')}</span>
               </h3>
             </div>
 
             <div className="space-y-1 mb-4">
               <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
-                Decentralized Identifier (DID)
+                {t('settings.did_label')}
               </span>
               <code className="text-xs bg-stone-50 border border-stone-200 p-2.5 rounded block font-mono text-stone-600 break-all select-all leading-normal">
                 {issuer.did}
@@ -289,7 +302,7 @@ export default function InstitutionSettings() {
             </div>
 
             <p className="text-xs text-stone-500 leading-relaxed">
-              <strong>Decentralized Identifier (DID):</strong> Your unique institutional identifier on Actik. It is standard did:web format bound to your institutional domain, allowing verifiers worldwide to cryptographically resolve your public signing keys.
+              <strong>{t('settings.did_desc_label')}</strong> {t('settings.did_desc_text')}
             </p>
           </div>
 
@@ -298,7 +311,7 @@ export default function InstitutionSettings() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
               <h3 className="text-sm font-bold text-stone-900 tracking-tight mb-5 flex items-center gap-2">
                 <Award size={18} className="text-indigo-500" />
-                <span>Accreditation Status</span>
+                <span>{t('settings.accreditation_status')}</span>
               </h3>
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl border gap-4 bg-stone-50/50">
@@ -325,7 +338,7 @@ export default function InstitutionSettings() {
                 <div className="mt-4 bg-amber-50/50 border border-amber-200 text-amber-800 rounded-xl p-3.5 text-xs leading-relaxed flex gap-2">
                   <span className="text-base">⏳</span>
                   <p className="margin-0">
-                    Your registration has been received successfully. Ministry of Education, Youth and Sport (MoEYS) administrators will review your credentials domain setup before approving your accreditation. You cannot issue credentials while pending approval.
+                    {t('settings.accreditation_pending_desc')}
                   </p>
                 </div>
               )}
@@ -338,14 +351,14 @@ export default function InstitutionSettings() {
               <div className="flex justify-between items-start mb-4">
                 <h3 className="text-sm font-bold text-stone-900 tracking-tight flex items-center gap-2">
                   <Award size={18} className="text-indigo-500" />
-                  <span>Public Key (for verification)</span>
+                  <span>{t('settings.public_key_title')}</span>
                 </h3>
                 <button
                   onClick={() => handleCopyPublicKey(issuer.public_key || '')}
                   className="text-stone-500 hover:text-indigo-600 transition-colors flex items-center gap-1 text-xs font-semibold p-1 hover:bg-stone-50 rounded cursor-pointer"
                 >
                   {copiedKey ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                  <span>{copiedKey ? 'Copied' : 'Copy'}</span>
+                  <span>{copiedKey ? t('settings.copied_btn') : t('settings.copy_btn')}</span>
                 </button>
               </div>
 
@@ -356,7 +369,7 @@ export default function InstitutionSettings() {
               </div>
 
               <p className="text-xs text-stone-500 leading-relaxed">
-                <strong>Public Key (ES256):</strong> This key is public and used by verifiers to validate the signatures on certificates you issue. Your matching private signing key is derived in your browser session and is never shared or stored in the database.
+                <strong>{t('settings.public_key_desc_label')}</strong> {t('settings.public_key_desc_text')}
               </p>
             </div>
           )}

@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useZkVault } from '../../vault/zk-vault'
 import { Fingerprint, Lock, CheckCircle, XCircle, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react'
+import { useLanguage } from '../../lib/i18n'
+import LanguageSwitcher from '../../components/LanguageSwitcher'
 
 // Note: The prompt expects import { useVault } from '../../vault/zk-vault/useVault'
 // But the actual file in this project exports useZkVault from '../../vault/zk-vault'
@@ -46,6 +48,7 @@ export default function VaultSetup() {
   const navigate = useNavigate()
   const location = useLocation()
   const { setupVault, checkVaultStatus, lock } = useZkVault()
+  const { t } = useLanguage()
 
   // Routing source check
   const searchParams = new URLSearchParams(location.search)
@@ -418,7 +421,7 @@ export default function VaultSetup() {
           borderRadius: '50%',
           animation: 'spin 1s linear infinite'
         }}></div>
-        <p className="muted" style={{ marginTop: '1rem' }}>Checking vault status...</p>
+        <p className="muted" style={{ marginTop: '1rem' }}>{t('account.checking_vault')}</p>
       </div>
     )
   }
@@ -438,9 +441,9 @@ export default function VaultSetup() {
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 text-2xl font-bold mb-3">
               ✓
             </div>
-            <h2 className="text-lg font-bold text-stone-900">Your Vault is Ready</h2>
+            <h2 className="text-lg font-bold text-stone-900">{t('account.title')}</h2>
             <p className="text-xs text-stone-500 mt-1 leading-relaxed max-w-md mx-auto">
-              Your digital credentials are encrypted locally with zero-knowledge keys. You can now claim, store, and verify your certificates.
+              {t('account.subtitle')}
             </p>
           </div>
 
@@ -450,16 +453,16 @@ export default function VaultSetup() {
               <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
-              Account Information
+              {t('account.account_info')}
             </h3>
             
             <div className="space-y-3.5 text-sm">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-500">Email Address</span>
+                <span className="text-gray-500">{t('account.email')}</span>
                 <strong className="text-stone-900 font-semibold">{currentUser?.email}</strong>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-500">Account Role</span>
+                <span className="text-gray-500">{t('account.role')}</span>
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
                   userRole === 'admin' 
                     ? 'bg-gray-100 text-gray-800 border border-gray-200' 
@@ -467,11 +470,11 @@ export default function VaultSetup() {
                       ? 'bg-purple-100 text-purple-800 border border-purple-200' 
                       : 'bg-teal-100 text-teal-800 border border-teal-200'
                 }`}>
-                  {userRole || 'Student'}
+                  {userRole ? t(`role.${userRole.toLowerCase()}`) : t('role.student')}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-gray-500">Account Created</span>
+                <span className="text-gray-500">{t('account.created')}</span>
                 <strong className="text-stone-900 font-medium">
                   {currentUser?.created_at ? new Date(currentUser.created_at).toLocaleDateString() : '—'}
                 </strong>
@@ -485,18 +488,18 @@ export default function VaultSetup() {
               <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
-              Vault Security
+              {t('account.vault_security')}
             </h3>
 
             <div className="space-y-3.5 text-sm mb-6">
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-500">Unlock Method</span>
+                <span className="text-gray-500">{t('account.unlock_method')}</span>
                 <strong className="text-stone-900 font-semibold capitalize flex items-center gap-1.5">
-                  {existingVault.unlock_method === 'pin' ? '🔢 6-digit PIN' : '👤 Biometric'}
+                  {existingVault.unlock_method === 'pin' ? t('account.pin_method') : t('account.bio_method')}
                 </strong>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-gray-500">Vault Configured</span>
+                <span className="text-gray-500">{t('account.vault_configured')}</span>
                 <strong className="text-stone-900 font-medium">
                   {new Date(existingVault.created_at || '').toLocaleDateString()}
                 </strong>
@@ -507,21 +510,24 @@ export default function VaultSetup() {
               onClick={() => setShowReconfigureModal(true)}
               className="w-full border border-indigo-600 bg-transparent hover:bg-indigo-50 active:bg-indigo-100 text-indigo-600 font-semibold h-11 px-4 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer"
             >
-              Change Unlock Method
+              {t('account.change_unlock')}
             </button>
           </div>
+
+          {/* Language Switcher Card */}
+          <LanguageSwitcher prefix="account" />
 
           {/* Card 3: Action Options */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-3">
             <button 
               className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
               onClick={() => navigate('/app/wallet')}>
-              Go to my wallet
+              {t('account.go_wallet')}
             </button>
             <button 
               className="w-full border border-red-200 bg-white hover:bg-red-50 active:bg-red-100 text-red-600 font-semibold h-11 rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
               onClick={() => setShowResetModal(true)}>
-              Reset vault
+              {t('account.reset_vault')}
             </button>
           </div>
 
@@ -531,8 +537,8 @@ export default function VaultSetup() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div>
-              <strong className="font-bold block mb-0.5">Security Recommendations:</strong>
-              Use a hardware passkey for biometrics-backed protection. Remember that Actik handles zero-knowledge encryption: if you lose your PIN or passcode, recovery is impossible. Never share your security secrets.
+              <strong className="font-bold block mb-0.5">{t('account.sec_recs')}</strong>
+              {t('account.sec_recs_desc')}
             </div>
           </div>
         </div>
@@ -545,9 +551,9 @@ export default function VaultSetup() {
         <div>
           {/* Header */}
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-stone-900 tracking-tight">Set up your vault</h2>
+            <h2 className="text-2xl font-bold text-stone-900 tracking-tight">{t('account.setup_title')}</h2>
             <p className="text-sm text-stone-500 mt-1 max-w-sm mx-auto leading-relaxed">
-              Your credentials are encrypted with a key that only your device holds
+              {t('account.vault_setup_subtitle')}
             </p>
           </div>
 
@@ -565,7 +571,7 @@ export default function VaultSetup() {
               >
                 {step > 1 ? '✓' : '1'}
               </div>
-              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Choose method</span>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">{t('account.step_choose_method')}</span>
             </div>
 
             {/* Step 2 */}
@@ -577,7 +583,7 @@ export default function VaultSetup() {
               >
                 {step > 2 ? '✓' : '2'}
               </div>
-              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Create vault</span>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">{t('account.step_create_vault')}</span>
             </div>
 
             {/* Step 3 */}
@@ -589,7 +595,7 @@ export default function VaultSetup() {
               >
                 3
               </div>
-              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">Done</span>
+              <span className="text-[10px] md:text-xs font-semibold mt-1.5 text-gray-500 hidden sm:inline">{t('account.step_done')}</span>
             </div>
           </div>
 
@@ -599,7 +605,7 @@ export default function VaultSetup() {
           {step === 1 && (
             <div>
               <h3 className="text-base md:text-lg font-bold text-stone-900 mb-4">
-                How do you want to unlock your vault?
+                {t('account.how_to_unlock')}
               </h3>
 
               {/* Cards Stack */}
@@ -616,17 +622,17 @@ export default function VaultSetup() {
                       <Fingerprint size={28} />
                     </div>
                     <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-200">
-                      Recommended
+                      {t('account.recommended_badge')}
                     </span>
                   </div>
-                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">Biometric</strong>
+                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">{t('account.biometric_title')}</strong>
                   <p className="text-xs text-gray-500 mt-2 mb-4 leading-relaxed">
-                    Use Face ID, Touch ID, or Windows Hello. Instant, secure, and stays on this device.
+                    {t('account.biometric_desc')}
                   </p>
                   <ul className="list-disc pl-4 space-y-1.5 text-[11px] text-gray-500 mt-auto">
-                    <li>Immediate biometric prompt</li>
-                    <li>No external key needed</li>
-                    <li>Highly secure & local</li>
+                    <li>{t('account.bio_feature_1')}</li>
+                    <li>{t('account.bio_feature_2')}</li>
+                    <li>{t('account.bio_feature_3')}</li>
                   </ul>
                 </div>
 
@@ -642,14 +648,14 @@ export default function VaultSetup() {
                       <Lock size={28} />
                     </div>
                   </div>
-                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">6-digit PIN</strong>
+                  <strong className="text-sm md:text-base text-gray-900 block font-semibold">{t('account.pin_title')}</strong>
                   <p className="text-xs text-gray-500 mt-2 mb-4 leading-relaxed">
-                    Set a 6-digit numeric passcode to unlock your credentials on any browser.
+                    {t('account.pin_desc')}
                   </p>
                   <ul className="list-disc pl-4 space-y-1.5 text-[11px] text-gray-500 mt-auto">
-                    <li>Works on any device</li>
-                    <li>Easy to configure</li>
-                    <li>No hardware needed</li>
+                    <li>{t('account.pin_feature_1')}</li>
+                    <li>{t('account.pin_feature_2')}</li>
+                    <li>{t('account.pin_feature_3')}</li>
                   </ul>
                 </div>
               </div>
@@ -661,7 +667,7 @@ export default function VaultSetup() {
                   {/* Create PIN block */}
                   <div className="mb-6">
                     <label className="text-xs md:text-sm font-bold text-gray-700 block text-center mb-3">
-                      Create your 6-digit PIN
+                      {t('account.create_pin')}
                     </label>
                     <div className="flex gap-2.5 justify-center">
                       {pinDigits.map((digit, idx) => (
@@ -683,7 +689,7 @@ export default function VaultSetup() {
                   {/* Confirm PIN block */}
                   <div className="mb-4">
                     <label className="text-xs md:text-sm font-bold text-gray-700 block text-center mb-3">
-                      Confirm your 6-digit PIN
+                      {t('account.confirm_pin')}
                     </label>
                     <div className="flex gap-2.5 justify-center">
                       {confirmDigits.map((digit, idx) => (
@@ -711,17 +717,17 @@ export default function VaultSetup() {
                         onChange={(e) => setShowPin(e.target.checked)} 
                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                       />
-                      <span>Show PIN digits</span>
+                      <span>{t('account.show_pin_digits')}</span>
                     </label>
 
                     {isPinComplete && isConfirmComplete && !pinsMatch && (
                       <span className="text-red-600 text-xs font-semibold">
-                        ❌ Passcodes do not match
+                        {t('account.pin_mismatch_error')}
                       </span>
                     )}
                     {isPinComplete && isConfirmComplete && pinsMatch && (
                       <span className="text-emerald-600 text-xs font-semibold">
-                        ✓ PIN matches
+                        {t('account.pin_matches')}
                       </span>
                     )}
                   </div>
@@ -743,7 +749,7 @@ export default function VaultSetup() {
                 onClick={handleContinueToStep2}
                 disabled={!canContinueStep1}
               >
-                Continue to create vault
+                {t('account.continue_btn')}
               </button>
 
               {/* SECURITY EXPLAINER SECTION */}
@@ -755,7 +761,7 @@ export default function VaultSetup() {
                 >
                   <div className="flex items-center gap-2">
                     <HelpCircle size={18} />
-                    <span>How does this work?</span>
+                    <span>{t('account.how_it_works')}</span>
                   </div>
                   {explainOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
@@ -786,10 +792,10 @@ export default function VaultSetup() {
           {step === 2 && (
             <div className="bg-white rounded-xl border border-gray-200 p-6 md:p-8 shadow-sm">
               <h3 className="text-base md:text-lg font-bold text-stone-900 mb-1">
-                Creating your vault
+                {t('account.creating_your_vault')}
               </h3>
               <p className="text-xs md:text-sm text-gray-500 mb-6 leading-relaxed">
-                Your browser will ask you to confirm with your {selectedMethod === 'pin' ? 'PIN passcode' : 'biometrics (Touch ID / Face ID)'}
+                {t('account.confirm_with_device')} {selectedMethod === 'pin' ? t('account.pin_passcode') : t('account.biometrics_touch')}
               </p>
 
               {/* Checklist visualizer */}
@@ -801,7 +807,7 @@ export default function VaultSetup() {
                   {creationStatus.keyGen === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
                   {creationStatus.keyGen === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
                   <span className={creationStatus.keyGen === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
-                    Generating encryption key...
+                    {t('account.generating_key')}
                   </span>
                 </div>
 
@@ -812,7 +818,7 @@ export default function VaultSetup() {
                   {creationStatus.envelope === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
                   {creationStatus.envelope === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
                   <span className={creationStatus.envelope === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
-                    Creating vault envelope...
+                    {t('account.creating_envelope')}
                   </span>
                 </div>
 
@@ -823,7 +829,7 @@ export default function VaultSetup() {
                   {creationStatus.saving === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
                   {creationStatus.saving === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
                   <span className={creationStatus.saving === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
-                    Saving to Actik...
+                    {t('account.saving_actik')}
                   </span>
                 </div>
 
@@ -834,7 +840,7 @@ export default function VaultSetup() {
                   {creationStatus.verifying === 'done' && <CheckCircle size={20} className="text-emerald-500 shrink-0" />}
                   {creationStatus.verifying === 'error' && <XCircle size={20} className="text-red-500 shrink-0" />}
                   <span className={creationStatus.verifying === 'running' ? 'text-gray-900 font-semibold' : 'text-gray-500'}>
-                    Verifying vault...
+                    {t('account.verifying_vault')}
                   </span>
                 </div>
               </div>
@@ -843,11 +849,11 @@ export default function VaultSetup() {
               {creationError && (
                 <div className="text-center">
                   <div className="w-full bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3.5 mb-6 text-left">
-                    <strong>Vault creation failed:</strong>
+                    <strong>{t('account.vault_creation_failed')}</strong>
                     <p className="mt-1 text-[11px] leading-relaxed">{creationError}</p>
                   </div>
                   <button className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm flex items-center justify-center cursor-pointer" onClick={() => setStep(1)}>
-                    Try again
+                    {t('wallet.try_again')}
                   </button>
                 </div>
               )}
@@ -864,9 +870,9 @@ export default function VaultSetup() {
                 ✓
               </div>
 
-              <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Vault ready</h2>
+              <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">{t('account.vault_ready_title')}</h2>
               <p className="text-xs md:text-sm text-gray-500 mb-6 leading-relaxed">
-                Your credentials are now protected by your {selectedMethod === 'pin' ? 'PIN passcode' : 'biometrics (Touch ID / Face ID)'}
+                {t('account.vault_protected_by')} {selectedMethod === 'pin' ? t('account.pin_passcode') : t('account.biometrics_touch')}
               </p>
 
               {/* Explainer cards */}
@@ -874,21 +880,21 @@ export default function VaultSetup() {
                 <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
                   <span className="text-base shrink-0">🛡️</span>
                   <p className="margin-0">
-                    <strong>Only you can open this vault</strong> — not even Actik can read your credentials or access your private keys.
+                    <strong>{t('account.only_you_open')}</strong> {t('account.only_you_open_desc')}
                   </p>
                 </div>
 
                 <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
                   <span className="text-base shrink-0">🏫</span>
                   <p className="margin-0">
-                    <strong>If you lose access</strong> to your recovery codes, ask your university or ministry to re-issue your certificate.
+                    <strong>{t('account.if_lose_access')}</strong> {t('account.if_lose_access_desc')}
                   </p>
                 </div>
 
                 <div className="flex gap-3 items-start p-3.5 bg-gray-50 border border-gray-200 rounded-lg text-xs leading-relaxed text-gray-500">
                   <span className="text-base shrink-0">🔑</span>
                   <p className="margin-0">
-                    <strong>Backup methods:</strong> You can add a backup unlock passcode or manage envelopes in Settings later.
+                    <strong>{t('account.backup_methods')}</strong> {t('account.backup_methods_desc')}
                   </p>
                 </div>
               </div>
@@ -900,7 +906,7 @@ export default function VaultSetup() {
                     className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
                     onClick={() => navigate('/app/wallet')}
                   >
-                    Return to wallet to claim your credentials
+                    {t('account.return_wallet_claim')}
                   </button>
                 ) : (
                   <>
@@ -908,13 +914,13 @@ export default function VaultSetup() {
                       className="w-full sm:flex-1 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
                       onClick={() => navigate('/app/wallet')}
                     >
-                      Go to my wallet
+                      {t('account.go_wallet')}
                     </button>
                     <button 
                       className="w-full sm:flex-1 border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
                       onClick={() => navigate('/app/dashboard')}
                     >
-                      Go to dashboard
+                      {t('account.go_dashboard')}
                     </button>
                   </>
                 )}
@@ -931,15 +937,15 @@ export default function VaultSetup() {
         <div className="fixed inset-0 bg-black/40 flex items-stretch md:items-center justify-end md:justify-center z-[1000] p-0 md:p-4 flex-col">
           <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in text-center">
             <div className="text-4xl mb-2">⚠️</div>
-            <h3 className="text-lg font-bold text-red-600 mb-2">This will delete your vault</h3>
+            <h3 className="text-lg font-bold text-red-600 mb-2">{t('account.delete_vault_warning')}</h3>
             
             <p className="text-xs text-gray-500 mb-6 leading-relaxed text-left">
-              Resetting your vault will <strong>permanently delete all encrypted credentials</strong> stored in it. You will need to re-claim all credentials from your institutions. <strong>This action cannot be undone.</strong>
+              {t('account.reset_vault_desc')}
             </p>
 
             <div className="mb-6 text-left">
               <label className="text-xs font-bold text-gray-700 block mb-2">
-                Type RESET to confirm
+                {t('account.type_reset_confirm')}
               </label>
               <input
                 type="text"
@@ -960,7 +966,7 @@ export default function VaultSetup() {
                 }}
                 disabled={isResetting}
               >
-                Cancel
+                {t('wallet.cancel')}
               </button>
 
               <button
@@ -974,7 +980,7 @@ export default function VaultSetup() {
                 {isResetting && (
                   <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
                 )}
-                <span>Reset</span>
+                <span>{t('account.reset_btn')}</span>
               </button>
             </div>
           </div>
@@ -989,9 +995,9 @@ export default function VaultSetup() {
           <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in">
             <div className="text-center mb-6">
               <div className="text-4xl mb-2">⚠️</div>
-              <h3 className="text-lg font-bold text-stone-900">Change Unlock Method?</h3>
+              <h3 className="text-lg font-bold text-stone-900">{t('account.change_unlock_method_q')}</h3>
               <p className="text-xs text-stone-500 mt-2 leading-relaxed text-center">
-                Changing your unlock method requires generating new local keys. Any credentials currently stored in your wallet will need to be re-encrypted or reclaimed.
+                {t('account.change_unlock_desc')}
               </p>
             </div>
 
@@ -1004,14 +1010,14 @@ export default function VaultSetup() {
                 }}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
               >
-                Proceed to Reconfigure
+                {t('account.proceed_reconfigure')}
               </button>
               
               <button
                 onClick={() => setShowReconfigureModal(false)}
                 className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
               >
-                Cancel
+                {t('wallet.cancel')}
               </button>
             </div>
           </div>

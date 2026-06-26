@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { issueSdJwt } from '../../lib/sdjwt'
+import { useLanguage } from '../../lib/i18n'
 
 // Shared keyframe spinner animation
 const spinStyles = `
@@ -20,6 +21,7 @@ interface IssuerInfo {
 }
 
 export default function IssueCredential() {
+  const { t } = useLanguage()
   const navigate = useNavigate()
   const [currentUser, setCurrentUser] = useState<any | null>(null)
   
@@ -32,12 +34,40 @@ export default function IssueCredential() {
   // Form Fields
   const [studentEmail, setStudentEmail] = useState('')
   const [fullName, setFullName] = useState('')
-  const [nationalId, setNationalId] = useState('')
-  
   const [degreeTitle, setDegreeTitle] = useState('')
-  const [completionYear, setCompletionYear] = useState(new Date().getFullYear().toString())
-  const [gpa, setGpa] = useState('')
+  const [studentId, setStudentId] = useState('')
+  const [major, setMajor] = useState('')
+  const [graduationDate, setGraduationDate] = useState('')
+  const [certificateId, setCertificateId] = useState('')
   const [notes, setNotes] = useState('')
+
+  // New Certificate Types State
+  const [selectedType, setSelectedType] = useState<string | null>(null)
+  
+  const [subType, setSubType] = useState('')
+  const [eventName, setEventName] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [organizer, setOrganizer] = useState('')
+  const [roleDescription, setRoleDescription] = useState('')
+
+  const [programName, setProgramName] = useState('')
+  const [duration, setDuration] = useState('')
+  const [completionDate, setCompletionDate] = useState('')
+  const [departmentOrRole, setDepartmentOrRole] = useState('')
+
+  const [achievementTitle, setAchievementTitle] = useState('')
+  const [basisDescription, setBasisDescription] = useState('')
+  const [dateAwarded, setDateAwarded] = useState('')
+
+  const [reason, setReason] = useState('')
+  const [capacity, setCapacity] = useState('')
+  const [appreciationDate, setAppreciationDate] = useState('')
+
+  const [certName, setCertName] = useState('')
+  const [issuingBody, setIssuingBody] = useState('')
+  const [licenseNumber, setLicenseNumber] = useState('')
+  const [dateCertified, setDateCertified] = useState('')
+  const [expiryDate, setExpiryDate] = useState('')
 
   // Certificate document upload (PDF or image)
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
@@ -73,14 +103,14 @@ export default function IssueCredential() {
         }
 
         // Check 1: Is user registered as an issuer?
-        // Support both user_id and owner columns
+        // Query using correct owner column
         let { data: issuerData, error: issuerError } = await supabase
           .from('issuers')
           .select('*')
-          .eq('user_id', session.user.id)
+          .eq('owner', session.user.id)
           .maybeSingle()
 
-        if (issuerError && (issuerError.message.includes('user_id') || issuerError.code === 'PGRST204')) {
+        if (issuerError && (issuerError.message.includes('owner') || issuerError.code === 'PGRST204')) {
           const fallback = await supabase
             .from('issuers')
             .select('*')
@@ -176,14 +206,34 @@ export default function IssueCredential() {
     if (fullName.trim().length < 2) {
       nextErrors.fullName = 'Student name must be at least 2 characters.'
     }
-    if (degreeTitle.trim().length < 3) {
-      nextErrors.degreeTitle = 'Degree title must be at least 3 characters.'
-    }
-    
-    const yearNum = Number(completionYear)
-    const currentYear = new Date().getFullYear()
-    if (!completionYear || isNaN(yearNum) || yearNum < 1990 || yearNum > currentYear + 1) {
-      nextErrors.completionYear = `Completion year must be a 4-digit number between 1990 and ${currentYear + 1}.`
+    if (selectedType === 'academic_degree') {
+      if (!degreeTitle) nextErrors.degreeTitle = 'Please select a degree type.'
+      if (!studentId.trim()) nextErrors.studentId = 'Student ID is required.'
+      if (!major.trim()) nextErrors.major = 'Major is required.'
+      if (!graduationDate) nextErrors.graduationDate = 'Graduation date is required.'
+      if (!certificateId.trim()) nextErrors.certificateId = 'Certificate ID is required.'
+      if (!photoDataUrl) nextErrors.photo = 'Certificate file/photo is required.'
+    } else if (selectedType === 'attendance_participation') {
+      if (!subType) nextErrors.subType = 'Type is required'
+      if (!eventName.trim()) nextErrors.eventName = 'Event name is required'
+      if (!eventDate) nextErrors.eventDate = 'Event date is required'
+      if (!organizer.trim()) nextErrors.organizer = 'Organizer is required'
+    } else if (selectedType === 'completion') {
+      if (!subType) nextErrors.subType = 'Type is required'
+      if (!programName.trim()) nextErrors.programName = 'Program name is required'
+      if (!completionDate) nextErrors.completionDate = 'Completion date is required'
+    } else if (selectedType === 'merit_excellence') {
+      if (!subType) nextErrors.subType = 'Type is required'
+      if (!achievementTitle.trim()) nextErrors.achievementTitle = 'Achievement title is required'
+      if (!basisDescription.trim()) nextErrors.basisDescription = 'Description is required'
+      if (!dateAwarded) nextErrors.dateAwarded = 'Date awarded is required'
+    } else if (selectedType === 'appreciation_service') {
+      if (!reason.trim()) nextErrors.reason = 'Reason is required'
+      if (!appreciationDate) nextErrors.appreciationDate = 'Date is required'
+    } else if (selectedType === 'professional_certification') {
+      if (!certName.trim()) nextErrors.certName = 'Certification name is required'
+      if (!issuingBody.trim()) nextErrors.issuingBody = 'Issuing body is required'
+      if (!dateCertified) nextErrors.dateCertified = 'Date certified is required'
     }
 
     setErrors(nextErrors)
@@ -200,57 +250,132 @@ export default function IssueCredential() {
       setIsSubmitting(true)
       setSubmitError(null)
 
-      // Step 1: Build the claims object (Khmer-text safe UTF-8)
+      let typeMetadata: any = null
+      
       const claims: Record<string, any> = {
         sub: studentUserId ?? studentEmail.trim().toLowerCase(),
         name: fullName.trim(),
-        degree: degreeTitle.trim(),
         institution: issuerInfo.name,
-        year: Number(completionYear),
         iss: issuerInfo.did,
         iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60 * 5) // 5 years expiry
+        exp: Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60 * 5)
       }
 
-      if (gpa.trim()) claims.gpa = gpa.trim()
-      if (nationalId.trim()) claims.national_id = nationalId.trim()
-      if (notes.trim()) claims.notes = notes.trim()
       if (photoDataUrl) claims.photo = photoDataUrl
 
+      if (selectedType === 'academic_degree') {
+        claims.degree = degreeTitle
+        claims.student_id = studentId.trim()
+        claims.major = major.trim()
+        claims.graduation_date = graduationDate
+        claims.certificate_id = certificateId.trim()
+      } else if (selectedType === 'attendance_participation') {
+        typeMetadata = {
+          sub_type: subType,
+          event_name: eventName.trim(),
+          event_date: eventDate,
+          organizer: organizer.trim()
+        }
+        if (roleDescription.trim()) typeMetadata.role_description = roleDescription.trim()
+      } else if (selectedType === 'completion') {
+        typeMetadata = {
+          sub_type: subType,
+          program_name: programName.trim(),
+          completion_date: completionDate
+        }
+        if (duration.trim()) typeMetadata.duration = duration.trim()
+        if (subType === 'Certificate of Internship Completion' && departmentOrRole.trim()) {
+          typeMetadata.department_or_role = departmentOrRole.trim()
+        }
+      } else if (selectedType === 'merit_excellence') {
+        typeMetadata = {
+          sub_type: subType,
+          achievement_title: achievementTitle.trim(),
+          basis_description: basisDescription.trim(),
+          date_awarded: dateAwarded
+        }
+      } else if (selectedType === 'appreciation_service') {
+        typeMetadata = {
+          sub_type: 'Certificate of Appreciation',
+          reason: reason.trim(),
+          date: appreciationDate
+        }
+        if (capacity.trim()) typeMetadata.capacity = capacity.trim()
+      } else if (selectedType === 'professional_certification') {
+        typeMetadata = {
+          cert_name: certName.trim(),
+          issuing_body: issuingBody.trim(),
+          date_certified: dateCertified
+        }
+        if (licenseNumber.trim()) typeMetadata.license_number = licenseNumber.trim()
+        if (expiryDate) typeMetadata.expiry_date = expiryDate
+      }
+
+      if (typeMetadata) {
+        Object.assign(claims, typeMetadata)
+      }
+
       // Step 2: Sign the SD-JWT
-      // Note: Function name is issueSdJwt in our lib/sdjwt.ts exports, and takes IssueParams.
       const sdJwt = await issueSdJwt({
         issuerDid: issuerInfo.did,
         issuerPrivateJwk: privateKey,
         subject: claims,
-        vct: 'https://actik.kh/credentials/degree',
+        vct: `https://actik.kh/credentials/${selectedType}`,
         expiresInSec: 365 * 24 * 60 * 60 * 5
       })
 
       // Step 3: Save to Supabase (attempt custom user fields first, then fall back to pending_credentials)
-      let res = await supabase.from('credentials').insert({
+      let insertData: any = {
         issuer_id: currentUser.id,
         holder_id: studentUserId ?? null,
         holder_email: studentEmail.trim().toLowerCase(),
         issuer_did: issuerInfo.did,
         institution_name: issuerInfo.name,
-        degree_title: degreeTitle.trim(),
         sd_jwt: sdJwt,
         claimed: false,
-        created_at: new Date().toISOString()
-      })
+        created_at: new Date().toISOString(),
+        credential_type: selectedType
+      }
+
+      if (selectedType === 'academic_degree') {
+        insertData.degree_title = degreeTitle
+        insertData.student_id = studentId.trim()
+        insertData.major = major.trim()
+        insertData.graduation_date = graduationDate
+        insertData.certificate_id = certificateId.trim()
+      } else {
+        insertData.type_metadata = typeMetadata
+      }
+
+      let res = await supabase.from('credentials').insert(insertData)
 
       // Fallback: If table schema matches schema.sql, insert as pending_credentials
       if (res.error && (res.error.message.includes('column') || res.error.code === '42703')) {
-        res = await supabase.from('pending_credentials').insert({
+        let fallbackData: any = {
           recipient_email: studentEmail.trim().toLowerCase(),
           sdjwt: sdJwt,
           issuer_did: issuerInfo.did,
-          label: degreeTitle.trim()
-        })
+          credential_type: selectedType
+        }
+        if (selectedType === 'academic_degree') {
+           fallbackData.label = degreeTitle
+           fallbackData.student_id = studentId.trim()
+           fallbackData.major = major.trim()
+           fallbackData.graduation_date = graduationDate
+           fallbackData.certificate_id = certificateId.trim()
+        } else {
+           fallbackData.type_metadata = typeMetadata
+           fallbackData.label = typeMetadata.sub_type || typeMetadata.cert_name || 'Certificate'
+        }
+        res = await supabase.from('pending_credentials').insert(fallbackData)
       }
 
-      if (res.error) throw res.error
+      if (res.error) {
+        if (res.error.code === '23505' && res.error.message.includes('certificate_id')) {
+          throw new Error('A certificate with this ID has already been issued by your institution.')
+        }
+        throw res.error
+      }
 
       setIssueSuccess(true)
       setIsSubmitting(false)
@@ -263,11 +388,35 @@ export default function IssueCredential() {
   const handleReset = () => {
     setStudentEmail('')
     setFullName('')
-    setNationalId('')
     setDegreeTitle('')
     setCompletionYear(new Date().getFullYear().toString())
     setGpa('')
     setNotes('')
+    setPhotoDataUrl(null)
+    setPhotoFileName('')
+    
+    setSubType('')
+    setEventName('')
+    setEventDate('')
+    setOrganizer('')
+    setRoleDescription('')
+    setProgramName('')
+    setDuration('')
+    setCompletionDate('')
+    setDepartmentOrRole('')
+    setAchievementTitle('')
+    setBasisDescription('')
+    setDateAwarded('')
+    setReason('')
+    setCapacity('')
+    setAppreciationDate('')
+    setCertName('')
+    setIssuingBody('')
+    setLicenseNumber('')
+    setDateCertified('')
+    setExpiryDate('')
+    
+    setSelectedType(null)
     setStudentFoundStatus(null)
     setStudentUserId(null)
     setErrors({})
@@ -290,7 +439,7 @@ export default function IssueCredential() {
           borderRadius: '50%',
           animation: 'spin 1s linear infinite'
         }}></div>
-        <p className="muted" style={{ marginTop: '1rem' }}>Checking authorization...</p>
+        <p className="muted" style={{ marginTop: '1rem' }}>{t('dashboard.checking_auth')}</p>
       </div>
     )
   }
@@ -301,15 +450,15 @@ export default function IssueCredential() {
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 md:p-8 text-center">
           <div className="text-5xl mb-4">⚠️</div>
-          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Institution Not Registered</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">{t('dashboard.inst_not_registered')}</h2>
           <p className="text-sm text-stone-500 mb-6 leading-relaxed">
-            You need to register your institution profile before you can access the credential issuance panel.
+            {t('dashboard.inst_not_registered_desc')}
           </p>
           <button 
             className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
             onClick={() => navigate('/app/register-issuer')}
           >
-            Register institution
+            {t('dashboard.register_btn')}
           </button>
         </div>
       </div>
@@ -321,18 +470,18 @@ export default function IssueCredential() {
     return (
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-amber-300 border-l-4 p-6 md:p-8">
-          <h2 className="text-xl md:text-2xl font-bold text-amber-700 mb-2">Awaiting MoEYS Approval</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-amber-700 mb-2">{t('dashboard.awaiting_approval')}</h2>
           <p className="text-sm text-stone-500 mb-4 leading-relaxed">
-            Your institution profile is registered, but it has not been accredited by MoEYS (Ministry of Education, Youth and Sport) yet.
+            {t('dashboard.awaiting_desc_issue')}
           </p>
           <p className="text-xs text-stone-500 mb-6 italic">
-            You cannot issue digital credentials until accreditation approval is granted.
+            {t('dashboard.awaiting_note_issue')}
           </p>
           <button 
             className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
             onClick={() => navigate('/app/dashboard')}
           >
-            Back to dashboard
+            {t('dashboard.back_to_dashboard')}
           </button>
         </div>
       </div>
@@ -344,12 +493,12 @@ export default function IssueCredential() {
     return (
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-red-300 border-l-4 p-6 md:p-8">
-          <h2 className="text-xl md:text-2xl font-bold text-red-700 mb-2">Signing Session Expired</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-red-700 mb-2">{t('dashboard.session_expired')}</h2>
           <p className="text-sm text-stone-500 mb-4 leading-relaxed">
-            Your cryptographic signing key is no longer available in this browser session. This happens when you close the tab, refresh the page, or the session timeout is reached.
+            {t('dashboard.session_expired_desc1')}
           </p>
           <p className="text-xs text-stone-500 mb-6">
-            Note: Your institution registration remains fully safe in the registry. You only need to sign back in with your Google account to reload the session key.
+            {t('dashboard.session_expired_desc2')}
           </p>
           <button 
             className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
@@ -358,7 +507,7 @@ export default function IssueCredential() {
               navigate('/auth/login', { replace: true })
             }}
           >
-            Sign out and back in
+            {t('dashboard.sign_out_back_in')}
           </button>
         </div>
       </div>
@@ -371,28 +520,28 @@ export default function IssueCredential() {
       <div className="w-full md:max-w-xl mx-auto px-4 md:px-0 pb-24">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 md:p-8 text-center">
           <div className="text-5xl text-emerald-500 mb-4">✓</div>
-          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">Credential Issued</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-stone-900 mb-2">{t('dashboard.credential_issued')}</h2>
 
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-left text-sm space-y-3">
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Student Email</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.student_email')}</span>
               <strong className="text-gray-900 text-base">{studentEmail}</strong>
             </div>
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Degree Certificate</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.degree_cert_label')}</span>
               <strong className="text-gray-900">{degreeTitle}</strong>
             </div>
             <div>
-              <span className="text-xs text-gray-400 block font-medium">Institution</span>
+              <span className="text-xs text-gray-400 block font-medium">{t('dashboard.institution')}</span>
               <strong className="text-gray-900">{issuerInfo?.name}</strong>
             </div>
           </div>
 
           <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded text-left text-xs text-emerald-800 leading-relaxed mb-6">
             {studentFoundStatus === 'found' ? (
-              <span>The student has an active account. They will instantly see this credential in their wallet and can claim it.</span>
+              <span>{t('dashboard.issue_success_active')}</span>
             ) : (
-              <span>The credential is saved in the pending registry. The student can claim it as soon as they sign up for an Actik account using this email address.</span>
+              <span>{t('dashboard.issue_success_pending')}</span>
             )}
           </div>
 
@@ -401,13 +550,13 @@ export default function IssueCredential() {
               className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
               onClick={handleReset}
             >
-              Issue another credential
+              {t('dashboard.issue_another')}
             </button>
             <button 
               className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-[52px] rounded-lg text-sm transition-all focus:outline-none flex items-center justify-center cursor-pointer" 
               onClick={() => navigate('/app/dashboard')}
             >
-              Go to dashboard
+              {t('account.go_dashboard')}
             </button>
           </div>
         </div>
@@ -435,24 +584,24 @@ export default function IssueCredential() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-          Back to dashboard
+          {t('dashboard.back_to_dashboard')}
         </button>
       </div>
 
       {/* Heading */}
       <div className="mb-4">
         <h2 className="text-xl md:text-2xl font-bold text-stone-900 tracking-tight">
-          Issue a credential
+          {t('dashboard.issue_credential_title')}
         </h2>
         <p className="text-sm text-stone-500 mt-1 leading-relaxed">
-          Sign and send a digital certificate to a student.
+          {t('dashboard.issue_credential_desc_form')}
         </p>
       </div>
 
       {/* Info Bar */}
       {issuerInfo && (
         <div className="inline-flex flex-wrap items-center bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-semibold mb-6 gap-2 max-w-full overflow-hidden">
-          <span>Signing as:</span>
+          <span>{t('dashboard.signing_as')}</span>
           <strong>{issuerInfo.name}</strong>
           <code className="mono bg-indigo-100/50 px-2 py-0.5 rounded text-[10px] break-all">
             {truncateDid(issuerInfo.did)}
@@ -461,20 +610,55 @@ export default function IssueCredential() {
       )}
 
       {/* Main Panel grid (Form on left, Preview on right) */}
-      <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr] gap-6">
+      {!selectedType ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[
+            { id: 'academic_degree', icon: '🎓', title: t('dashboard.type_academic'), desc: t('dashboard.type_academic_desc') },
+            { id: 'attendance_participation', icon: '✋', title: t('dashboard.type_attendance'), desc: t('dashboard.type_attendance_desc') },
+            { id: 'completion', icon: '✅', title: t('dashboard.type_completion'), desc: t('dashboard.type_completion_desc') },
+            { id: 'merit_excellence', icon: '⭐', title: t('dashboard.type_merit'), desc: t('dashboard.type_merit_desc') },
+            { id: 'appreciation_service', icon: '🤝', title: t('dashboard.type_appreciation'), desc: t('dashboard.type_appreciation_desc') },
+            { id: 'professional_certification', icon: '💼', title: t('dashboard.type_professional'), desc: t('dashboard.type_professional_desc') }
+          ].map(c => (
+            <button 
+              key={c.id} 
+              onClick={() => setSelectedType(c.id)} 
+              className="p-5 bg-white border border-gray-200 rounded-xl hover:border-indigo-500 hover:shadow-sm text-left flex items-start gap-4 transition-all cursor-pointer"
+            >
+              <div className="text-3xl shrink-0 mt-0.5">{c.icon}</div>
+              <div>
+                <h3 className="font-bold text-stone-900 text-[15px]">{c.title}</h3>
+                <p className="text-xs text-stone-500 mt-1 leading-relaxed">{c.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+      <div className="max-w-2xl mx-auto">
         
         {/* Form Card */}
         <div className="bg-transparent md:bg-white rounded-xl md:shadow-sm md:border md:border-gray-200 p-0 md:p-8">
+          
+          <button 
+            onClick={() => setSelectedType(null)}
+            className="mb-6 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors focus:outline-none cursor-pointer bg-indigo-50 px-3 py-1.5 rounded-full"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            {t('dashboard.change_cert_type')}
+          </button>
+
           <form onSubmit={handleIssue} className="space-y-5">
             
             {/* Section A: Student Identity */}
             <h3 className="border-b border-gray-200 pb-2 text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-2 mb-4">
-              Student Section
+              {t('dashboard.student_section')}
             </h3>
 
             {/* Student Email */}
             <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">Student email</label>
+              <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.student_email_req')} <span className="text-red-500">*</span></label>
               <div className="relative mt-1">
                 <input
                   type="email"
@@ -494,12 +678,12 @@ export default function IssueCredential() {
               {/* Lookup notices */}
               {studentFoundStatus === 'found' && (
                 <p className="text-emerald-600 text-xs mt-1 font-semibold">
-                  ✓ Student account found
+                  {t('dashboard.student_found')}
                 </p>
               )}
               {studentFoundStatus === 'not_found' && (
                 <p className="text-amber-600 text-xs mt-1 font-semibold italic leading-normal">
-                  ⚠ No Actik account found with this email. The credential will be issued but the student cannot claim it until they sign up.
+                  {t('dashboard.student_not_found_warning')}
                 </p>
               )}
               {errors.studentEmail && (
@@ -509,7 +693,7 @@ export default function IssueCredential() {
 
             {/* Full Name */}
             <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">Full name</label>
+              <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.full_name_req')} <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={fullName}
@@ -522,44 +706,16 @@ export default function IssueCredential() {
               )}
             </div>
 
-            {/* National ID */}
-            <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">National ID (optional)</label>
-              <input
-                type="text"
-                value={nationalId}
-                onChange={(e) => setNationalId(e.target.value)}
-                placeholder="123456789"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
-              />
-              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
-                This field will be hidden by default when the student shares their credential
-              </p>
-            </div>
+
 
             {/* Section B: Credential Details */}
             <h3 className="border-b border-gray-200 pb-2 text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-6 mb-4">
-              Credential Details
+              {t('dashboard.credential_details')}
             </h3>
 
-            {/* Degree Title */}
+            {/* Issuing Institution (Common) */}
             <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">Degree or certificate title</label>
-              <input
-                type="text"
-                value={degreeTitle}
-                onChange={(e) => setDegreeTitle(e.target.value)}
-                placeholder="Bachelor of Information Technology"
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
-              />
-              {errors.degreeTitle && (
-                <p className="text-red-600 text-xs mt-1 font-semibold">{errors.degreeTitle}</p>
-              )}
-            </div>
-
-            {/* Issuing Institution */}
-            <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">Issuing institution</label>
+              <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.issuing_institution')}</label>
               <input
                 type="text"
                 value={issuerInfo?.name || ''}
@@ -568,57 +724,249 @@ export default function IssueCredential() {
               />
             </div>
 
-            {/* Year & GPA Row (Stacked on mobile, grid on desktop) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Completion Year */}
-              <div>
-                <label className="text-xs md:text-sm font-bold text-gray-700 block">Year of completion</label>
-                <input
-                  type="number"
-                  value={completionYear}
-                  onChange={(e) => setCompletionYear(e.target.value)}
-                  min="1990"
-                  max={(new Date().getFullYear() + 1).toString()}
-                  placeholder="2024"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
-                />
-                {errors.completionYear && (
-                  <p className="text-red-600 text-xs mt-1 font-semibold">{errors.completionYear}</p>
+            {selectedType === 'academic_degree' && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.degree_type_req')} <span className="text-red-500">*</span></label>
+                    <select
+                      value={degreeTitle}
+                      onChange={(e) => setDegreeTitle(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                    >
+                      <option value="">{t('dashboard.select_type')}</option>
+                      <option value="Bachelor">Bachelor</option>
+                      <option value="Master">Master</option>
+                      <option value="Doctorate (PhD)">Doctorate (PhD)</option>
+                      <option value="Associate">Associate</option>
+                    </select>
+                    {errors.degreeTitle && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.degreeTitle}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.major_req')} <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={major}
+                      onChange={(e) => setMajor(e.target.value)}
+                      placeholder="e.g. Computer Science"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                    />
+                    {errors.major && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.major}</p>}
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.student_id_req')} <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
+                      placeholder="e.g. STU-2024-001"
+                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                    />
+                    {errors.studentId && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.studentId}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.grad_date_req')} <span className="text-red-500">*</span></label>
+                    <input
+                      type="date"
+                      value={graduationDate}
+                      onChange={(e) => setGraduationDate(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                    />
+                    {errors.graduationDate && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.graduationDate}</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.cert_id_req')} <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={certificateId}
+                    onChange={(e) => setCertificateId(e.target.value)}
+                    placeholder="e.g. CERT-2024-12345"
+                    className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                  />
+                  {errors.certificateId && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.certificateId}</p>}
+                </div>
+              </>
+            )}
+
+            {selectedType === 'attendance_participation' && (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.type_req')}</label>
+                  <select value={subType} onChange={e => setSubType(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900">
+                    <option value="">{t('dashboard.select_type')}</option>
+                    <option value="Certificate of Attendance">Certificate of Attendance</option>
+                    <option value="Certificate of Participation">Certificate of Participation</option>
+                  </select>
+                  {errors.subType && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.subType}</p>}
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.event_name_req')}</label>
+                  <input type="text" value={eventName} onChange={e => setEventName(e.target.value)} placeholder="Annual Tech Conference 2026" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.eventName && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.eventName}</p>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.event_date_req')}</label>
+                    <input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.eventDate && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.eventDate}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.organizer_req')}</label>
+                    <input type="text" value={organizer} onChange={e => setOrganizer(e.target.value)} placeholder="Ministry of Education" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.organizer && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.organizer}</p>}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.role_desc_opt')}</label>
+                  <input type="text" value={roleDescription} onChange={e => setRoleDescription(e.target.value)} placeholder="Keynote Speaker" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                </div>
+              </>
+            )}
+
+            {selectedType === 'completion' && (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.type_req')}</label>
+                  <select value={subType} onChange={e => setSubType(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900">
+                    <option value="">{t('dashboard.select_type')}</option>
+                    <option value="Certificate of Completion">Certificate of Completion</option>
+                    <option value="Certificate of Internship Completion">Certificate of Internship Completion</option>
+                  </select>
+                  {errors.subType && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.subType}</p>}
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.program_name_req')}</label>
+                  <input type="text" value={programName} onChange={e => setProgramName(e.target.value)} placeholder="Advanced React Bootcamp" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.programName && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.programName}</p>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.completion_date_req')}</label>
+                    <input type="date" value={completionDate} onChange={e => setCompletionDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.completionDate && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.completionDate}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.duration_opt')}</label>
+                    <input type="text" value={duration} onChange={e => setDuration(e.target.value)} placeholder="12 Weeks" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  </div>
+                </div>
+                {subType === 'Certificate of Internship Completion' && (
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.dept_role_opt')}</label>
+                    <input type="text" value={departmentOrRole} onChange={e => setDepartmentOrRole(e.target.value)} placeholder="Frontend Engineering Intern" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  </div>
                 )}
-              </div>
+              </>
+            )}
 
-              {/* GPA */}
+            {selectedType === 'merit_excellence' && (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.type_req')}</label>
+                  <select value={subType} onChange={e => setSubType(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900">
+                    <option value="">{t('dashboard.select_type')}</option>
+                    <option value="Certificate of Merit">Certificate of Merit</option>
+                    <option value="Certificate of Excellence">Certificate of Excellence</option>
+                  </select>
+                  {errors.subType && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.subType}</p>}
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.achievement_title_req')}</label>
+                  <input type="text" value={achievementTitle} onChange={e => setAchievementTitle(e.target.value)} placeholder="Top Student of the Year" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.achievementTitle && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.achievementTitle}</p>}
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.basis_desc_req')}</label>
+                  <textarea value={basisDescription} onChange={e => setBasisDescription(e.target.value)} placeholder="Achieved the highest overall score in the graduating class." rows={2} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900 resize-vertical min-h-[60px]" />
+                  {errors.basisDescription && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.basisDescription}</p>}
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.date_awarded_req')}</label>
+                  <input type="date" value={dateAwarded} onChange={e => setDateAwarded(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.dateAwarded && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.dateAwarded}</p>}
+                </div>
+              </>
+            )}
+
+            {selectedType === 'appreciation_service' && (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.reason_req')}</label>
+                  <input type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="Outstanding contribution to the community outreach program" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.reason && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.reason}</p>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.date_req')}</label>
+                    <input type="date" value={appreciationDate} onChange={e => setAppreciationDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.appreciationDate && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.appreciationDate}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.capacity_opt')}</label>
+                    <input type="text" value={capacity} onChange={e => setCapacity(e.target.value)} placeholder="Lead Volunteer" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {selectedType === 'professional_certification' && (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.cert_name_req')}</label>
+                  <input type="text" value={certName} onChange={e => setCertName(e.target.value)} placeholder="Certified Cloud Architect" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  {errors.certName && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.certName}</p>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.issuing_body_req')}</label>
+                    <input type="text" value={issuingBody} onChange={e => setIssuingBody(e.target.value)} placeholder="Cloud Services Inc." className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.issuingBody && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.issuingBody}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.license_num_opt')}</label>
+                    <input type="text" value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} placeholder="CCA-12345" className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.date_certified_req')}</label>
+                    <input type="date" value={dateCertified} onChange={e => setDateCertified(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                    {errors.dateCertified && <p className="text-red-600 text-xs mt-1 font-semibold">{errors.dateCertified}</p>}
+                  </div>
+                  <div>
+                    <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.expiry_date_opt')}</label>
+                    <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900" />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Additional Notes - hidden for academic_degree per spec */}
+            {selectedType !== 'academic_degree' && (
               <div>
-                <label className="text-xs md:text-sm font-bold text-gray-700 block">GPA / Grade (optional)</label>
-                <input
-                  type="text"
-                  value={gpa}
-                  onChange={(e) => setGpa(e.target.value)}
-                  placeholder="3.8 / 4.0"
-                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 h-11 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900"
+                <label className="text-xs md:text-sm font-bold text-gray-700 block">{t('dashboard.additional_notes_opt')}</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Graduated with distinction. Major in Software Engineering."
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900 resize-vertical min-h-[80px]"
                 />
               </div>
-            </div>
-
-            {/* Additional Notes */}
-            <div>
-              <label className="text-xs md:text-sm font-bold text-gray-700 block">Additional notes (optional)</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Graduated with distinction. Major in Software Engineering."
-                className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white text-stone-900 resize-vertical min-h-[80px]"
-              />
-            </div>
+            )}
 
             {/* Certificate Document Upload */}
             <div>
               <label className="text-xs md:text-sm font-bold text-gray-700 block">
-                Certificate document <span className="font-normal text-gray-400">(optional)</span>
+                {t('dashboard.cert_doc_req')} {selectedType === 'academic_degree' ? <span className="text-red-500">*</span> : <span className="font-normal text-gray-400">(optional)</span>}
               </label>
               <p className="text-[11px] text-gray-500 mt-0.5 mb-2">
-                Upload a scan or PDF of the physical certificate. Accepted: PDF, JPG, PNG, WEBP.
+                {t('dashboard.cert_doc_desc')}
               </p>
 
               {/* Drop zone / file picker */}
@@ -643,7 +991,7 @@ export default function IssueCredential() {
                         className="max-h-48 max-w-full mx-auto rounded object-contain border border-gray-200"
                       />
                     )}
-                    <p className="text-[11px] text-center text-indigo-500 font-medium">Click to replace</p>
+                    <p className="text-[11px] text-center text-indigo-500 font-medium">{t('dashboard.change_file')}</p>
                   </div>
                 ) : (
                   /* Empty state */
@@ -651,8 +999,8 @@ export default function IssueCredential() {
                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                     </svg>
-                    <span className="text-xs font-medium">Click to upload or drag & drop</span>
-                    <span className="text-[11px]">PDF, JPG, PNG, WEBP</span>
+                    <span className="text-xs font-medium">{t('dashboard.select_file')}</span>
+                    <span className="text-[11px]">{t('dashboard.pdf_image_limit')}</span>
                   </div>
                 )}
                 <input
@@ -685,13 +1033,16 @@ export default function IssueCredential() {
               {photoError && (
                 <p className="text-red-600 text-xs mt-1 font-semibold">{photoError}</p>
               )}
+              {errors.photo && (
+                <p className="text-red-600 text-xs mt-1 font-semibold">{errors.photo}</p>
+              )}
               {photoDataUrl && (
                 <button
                   type="button"
                   onClick={() => { setPhotoDataUrl(null); setPhotoFileName('') }}
                   className="mt-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors"
                 >
-                  Remove document
+                  {t('dashboard.remove_document')}
                 </button>
               )}
             </div>
@@ -719,73 +1070,16 @@ export default function IssueCredential() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               )}
-              <span>Issue Credential</span>
+              <span>{t('dashboard.issue_credential_btn')}</span>
             </button>
 
           </form>
         </div>
 
-        {/* Live Preview Panel (Desktop-only md:block) */}
-        <div className="hidden md:block">
-          <h3 className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">
-            Credential Preview
-          </h3>
-          <div 
-            className="bg-white rounded-xl shadow-sm border-2 border-indigo-150 p-6 min-h-[300px] flex flex-col justify-between relative overflow-hidden" 
-            style={{
-              backgroundImage: 'radial-gradient(circle at 10% 20%, rgba(99,102,241,0.03) 0%, rgba(99,102,241,0) 80%)'
-            }}
-          >
-            {/* Border frame */}
-            <div className="absolute inset-2 border border-gray-100 opacity-60 pointer-events-none rounded-lg" />
 
-            {/* Certificate content */}
-            <div>
-              <div className="flex justify-between items-start mb-6">
-                <span className="text-lg font-bold text-indigo-700">
-                  {issuerInfo?.name || 'Institution Name'}
-                </span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-250">Accredited</span>
-              </div>
-
-              <div className="text-center my-6">
-                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
-                  This certifies that
-                </p>
-                <p className="text-xl font-bold text-gray-900 mb-1">
-                  {fullName.trim() || 'Student Full Name'}
-                </p>
-                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
-                  has completed the requirements for
-                </p>
-                <p className="text-base font-bold text-indigo-650">
-                  {degreeTitle.trim() || 'Degree Certificate Title'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-end border-t border-gray-100 pt-4 text-xs text-gray-500">
-              <div>
-                <div>Signed by issuer DID:</div>
-                <code className="mono block text-[9px] mt-0.5 text-indigo-650">
-                  {issuerInfo ? truncateDid(issuerInfo.did) : 'did:web:...'}
-                </code>
-              </div>
-              <div className="text-right">
-                <div>Year: <strong>{completionYear || '—'}</strong></div>
-                {gpa.trim() && <div className="mt-0.5">GPA: <strong>{gpa}</strong></div>}
-              </div>
-            </div>
-
-            {/* SD-JWT Badge */}
-            <div className="absolute top-2.5 right-2.5">
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-150">SD-JWT VC</span>
-            </div>
-          </div>
-        </div>
 
       </div>
-
+      )}
     </div>
   )
 }

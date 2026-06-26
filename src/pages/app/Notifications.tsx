@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useZkVault } from '../../vault/zk-vault'
+import { useLanguage } from '../../lib/i18n'
 import { Bell, ArrowLeft, Inbox } from 'lucide-react'
 
 interface PendingCredential {
@@ -18,12 +19,15 @@ interface PendingCredential {
   created_at: string
   cipher?: string
   iv?: string
+  credential_type?: string
+  type_metadata?: any
 }
 
 export default function Notifications() {
   const navigate = useNavigate()
+  const { t } = useLanguage()
   const { 
-    isUnlocked, 
+    isUnlocked,  
     checkVaultStatus, 
     unlockWithPin, 
     unlockWithPasskey, 
@@ -133,7 +137,8 @@ export default function Notifications() {
         sd_jwt: p.sdjwt,
         claimed: false,
         claimed_at: null,
-        created_at: p.created_at
+        created_at: p.created_at,
+        credential_type: p.credential_type
       }))
 
       setPendingList(unclaimedList)
@@ -210,11 +215,11 @@ export default function Notifications() {
         setIsUnlocking(false)
         await executeClaim(unlockTargetCred)
       } else {
-        setUnlockError('Vault unlock failed. Please check your PIN.')
+        setUnlockError(t('wallet.vault_unlock_failed'))
         setIsUnlocking(false)
       }
     } catch {
-      setUnlockError('Unlock encountered an error. Please try again.')
+      setUnlockError(t('wallet.vault_unlock_error'))
       setIsUnlocking(false)
     }
   }
@@ -231,11 +236,11 @@ export default function Notifications() {
         setIsUnlocking(false)
         await executeClaim(unlockTargetCred)
       } else {
-        setUnlockError('Passkey authentication failed.')
+        setUnlockError(t('wallet.passkey_auth_failed'))
         setIsUnlocking(false)
       }
     } catch {
-      setUnlockError('Passkey encounter error.')
+      setUnlockError(t('wallet.passkey_error'))
       setIsUnlocking(false)
     }
   }
@@ -257,9 +262,15 @@ export default function Notifications() {
       if (isFallback) {
         updateRes = await supabase.from('credentials').insert({
           owner: currentUser.id,
-          label: cred.degree_title,
+          label: cred.degree_title || cred.label,
           cipher: encryptedPayload.cipher,
-          iv: encryptedPayload.iv
+          iv: encryptedPayload.iv,
+          credential_type: cred.credential_type,
+          type_metadata: cred.type_metadata,
+          student_id: cred.student_id,
+          major: cred.major,
+          graduation_date: cred.graduation_date,
+          certificate_id: cred.certificate_id
         })
 
         if (!updateRes.error) {
@@ -277,11 +288,11 @@ export default function Notifications() {
       }
 
       if (updateRes.error) {
-        throw new Error('Credential encrypted but failed to save. Please try again.')
+        throw new Error(t('wallet.cred_save_failed'))
       }
 
       setPendingList(prev => prev.filter(c => c.id !== cred.id))
-      showToast('Credential claimed and encrypted successfully!')
+      showToast(t('wallet.cred_claim_success'))
     } catch (err: any) {
       setClaimErrors(prev => ({ ...prev, [cred.id]: err.message || 'Claim failed' }))
     } finally {
@@ -300,7 +311,7 @@ export default function Notifications() {
       {/* Back Link */}
       <Link to="/app/wallet" className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-indigo-600 transition-colors mb-6">
         <ArrowLeft size={16} />
-        Back to wallet
+        {t('wallet.back_to_wallet')}
       </Link>
 
       <div className="flex items-center gap-3 mb-6">
@@ -308,9 +319,9 @@ export default function Notifications() {
           <Bell size={24} />
         </div>
         <div>
-          <h2 className="text-2xl md:text-3xl font-bold text-stone-900 tracking-tight">Notifications</h2>
+          <h2 className="text-2xl md:text-3xl font-bold text-stone-900 tracking-tight">{t('wallet.notifications_title')}</h2>
           <p className="text-sm text-stone-500 mt-0.5">
-            Claim credentials issued to your Cambodian digital identity
+            {t('wallet.notifications_desc')}
           </p>
         </div>
       </div>
@@ -318,16 +329,16 @@ export default function Notifications() {
       {loading && (
         <div className="flex flex-col items-center justify-center py-20 bg-white border border-gray-200 rounded-xl shadow-sm">
           <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-200 border-t-indigo-600" />
-          <p className="text-stone-500 mt-4 font-medium">Checking pending credentials...</p>
+          <p className="text-stone-500 mt-4 font-medium">{t('wallet.checking_pending_credentials')}</p>
         </div>
       )}
 
       {loadError && !loading && (
         <div className="w-full bg-red-50 border border-red-200 text-red-700 rounded-xl p-6 text-center shadow-sm">
-          <h3 className="font-semibold text-red-900 text-lg mb-2">Failed to load notifications</h3>
-          <p className="text-sm text-red-700 mb-4">Please refresh the page to try again.</p>
+          <h3 className="font-semibold text-red-900 text-lg mb-2">{t('wallet.failed_load_notifications')}</h3>
+          <p className="text-sm text-red-700 mb-4">{t('wallet.refresh_to_try_again')}</p>
           <button className="bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-semibold h-11 px-6 rounded-lg text-sm transition-colors cursor-pointer" onClick={() => loadPending(currentUser)}>
-            Retry
+            {t('wallet.retry_btn')}
           </button>
         </div>
       )}
@@ -339,9 +350,9 @@ export default function Notifications() {
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 mb-4">
                 <Inbox size={32} />
               </div>
-              <h3 className="text-lg font-bold text-stone-900">All caught up!</h3>
+              <h3 className="text-lg font-bold text-stone-900">{t('wallet.all_caught_up')}</h3>
               <p className="text-sm text-stone-500 max-w-sm mx-auto mt-2 leading-relaxed">
-                You have no pending credentials to claim at this time. Institutions will issue digital certificates directly to your identity.
+                {t('wallet.no_pending_credentials_desc')}
               </p>
             </div>
           ) : (
@@ -356,7 +367,7 @@ export default function Notifications() {
                       {c.institution_name ? `${c.institution_name} — ` : ''}{c.degree_title}
                     </strong>
                     <div className="text-xs text-gray-500 mt-1">
-                      Issued by: <code className="font-mono text-[10px] text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded break-all">{truncateDid(c.issuer_did)}</code>
+                      {t('wallet.issued_by')}<code className="font-mono text-[10px] text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded break-all">{truncateDid(c.issuer_did)}</code>
                     </div>
                   </div>
 
@@ -372,13 +383,13 @@ export default function Notifications() {
                       {claimingCredId === c.id && (
                         <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
                       )}
-                      <span>Claim to Vault</span>
+                      <span>{t('wallet.claim_to_vault_btn')}</span>
                     </button>
                   </div>
 
                   {claimErrors[c.id] && (
                     <div className="w-full bg-red-50 border border-red-200 text-red-700 text-xs rounded p-2.5 mt-2">
-                      Claim failed: {claimErrors[c.id]}
+                      {t('wallet.claim_failed_msg')}{claimErrors[c.id]}
                     </div>
                   )}
                 </div>
@@ -396,16 +407,16 @@ export default function Notifications() {
           <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in">
             <div className="text-center mb-4">
               <div className="text-4xl mb-2">🔒</div>
-              <h3 className="text-lg font-bold text-stone-900">Unlock Your Vault</h3>
+              <h3 className="text-lg font-bold text-stone-900">{t('wallet.unlock_vault_title')}</h3>
               <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                Your encryption keys are derived locally. Please unlock your vault to process this credential.
+                {t('wallet.unlock_vault_modal_desc')}
               </p>
             </div>
 
             {unlockMethod === 'pin' && (
               <form onSubmit={handleUnlockAndClaimSubmit} className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1.5 mb-2">
-                  <label className="text-xs font-semibold text-stone-700">Enter Vault PIN</label>
+                  <label className="text-xs font-semibold text-stone-700">{t('wallet.enter_vault_pin')}</label>
                   <input
                     type="password"
                     value={pinInput}
@@ -431,7 +442,7 @@ export default function Notifications() {
                     {isUnlocking && (
                       <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
                     )}
-                    <span>Unlock & Claim</span>
+                    <span>{t('wallet.unlock_and_claim_btn')}</span>
                   </button>
 
                   <button
@@ -443,7 +454,7 @@ export default function Notifications() {
                     disabled={isUnlocking}
                     className="w-full text-gray-500 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
                   >
-                    Cancel
+                    {t('wallet.cancel')}
                   </button>
                 </div>
               </form>
@@ -453,8 +464,8 @@ export default function Notifications() {
               <div className="flex flex-col gap-3">
                 <div className="text-center py-4 text-sm text-stone-600">
                   {unlockMethod === 'biometric'
-                    ? 'Authenticate using your secure local biometrics.'
-                    : 'Authenticate using your secure device passkey.'}
+                    ? t('wallet.auth_biometric_desc')
+                    : t('wallet.auth_passkey_desc')}
                 </div>
 
                 {unlockError && (
@@ -473,7 +484,7 @@ export default function Notifications() {
                     {isUnlocking && (
                       <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
                     )}
-                    <span>{unlockMethod === 'biometric' ? '👤 Unlock with Biometric' : '🔑 Unlock with Passkey'}</span>
+                    <span>{unlockMethod === 'biometric' ? t('wallet.unlock_with_biometric') : t('wallet.unlock_with_passkey')}</span>
                   </button>
 
                   <button
@@ -485,7 +496,7 @@ export default function Notifications() {
                     disabled={isUnlocking}
                     className="w-full text-gray-500 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
                   >
-                    Cancel
+                    {t('wallet.cancel')}
                   </button>
                 </div>
               </div>
@@ -494,7 +505,7 @@ export default function Notifications() {
             {(unlockMethod === 'both' || unlockMethod === null) && (
               <form onSubmit={handleUnlockAndClaimSubmit} className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1.5 mb-2">
-                  <label className="text-xs font-semibold text-stone-700">Enter Vault PIN</label>
+                  <label className="text-xs font-semibold text-stone-700">{t('wallet.enter_vault_pin')}</label>
                   <input
                     type="password"
                     value={pinInput}
@@ -520,7 +531,7 @@ export default function Notifications() {
                     {isUnlocking && (
                       <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-200 border-t-white" />
                     )}
-                    <span>Unlock & Claim</span>
+                    <span>{t('wallet.unlock_and_claim_btn')}</span>
                   </button>
 
                   <button
@@ -529,7 +540,7 @@ export default function Notifications() {
                     disabled={isUnlocking}
                     className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-11 rounded-lg text-sm flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <span>🔑 Unlock with Passkey</span>
+                    <span>{t('wallet.unlock_with_passkey')}</span>
                   </button>
 
                   <button
@@ -541,7 +552,7 @@ export default function Notifications() {
                     disabled={isUnlocking}
                     className="w-full text-gray-500 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
                   >
-                    Cancel
+                    {t('wallet.cancel')}
                   </button>
                 </div>
               </form>
@@ -557,22 +568,22 @@ export default function Notifications() {
         <div className="fixed inset-0 bg-black/40 flex items-stretch md:items-center justify-end md:justify-center z-[100] p-0 md:p-4 flex-col">
           <div className="bg-white rounded-t-2xl md:rounded-xl shadow-lg p-6 md:p-8 w-full max-w-sm flex flex-col pb-8 md:pb-8 animate-scale-in text-center">
             <div className="text-4xl mb-2">⚙️</div>
-            <h3 className="text-lg font-bold text-stone-900">Vault setup required</h3>
+            <h3 className="text-lg font-bold text-stone-900">{t('wallet.vault_setup_required_title')}</h3>
             <p className="text-xs text-stone-500 mt-2 mb-6 leading-relaxed">
-              Your digital credentials are encrypted locally for zero-knowledge privacy. You must set up your vault to store this certificate.
+              {t('wallet.vault_setup_required_desc')}
             </p>
             <div className="flex flex-col gap-2.5">
               <button
                 className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
                 onClick={() => navigate('/app/vault-setup')}
               >
-                Set up my vault
+                {t('wallet.setup_my_vault_btn')}
               </button>
               <button
                 className="w-full border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-semibold h-11 rounded-lg text-sm flex items-center justify-center cursor-pointer"
                 onClick={() => setShowSetupNeededModal(false)}
               >
-                Cancel
+                {t('wallet.cancel')}
               </button>
             </div>
           </div>
